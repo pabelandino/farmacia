@@ -1,0 +1,398 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  ADMIN
+  CASHIER
+}
+
+enum InvoiceStatus {
+  PAID
+  CREDIT
+  VOID
+}
+
+model User {
+  id           Int      @id @default(autoincrement())
+  code         String
+  username     String   @unique
+  passwordHash String
+  role         UserRole @default(CASHIER)
+  address      String?
+  phone        String?
+  permissions  Json     @default("{}")
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  invoices     Invoice[]
+
+  @@map("users")
+}
+
+model Client {
+  id         Int      @id @default(autoincrement())
+  code       String
+  name       String
+  address    String?
+  phone      String?
+  cell       String?
+  nationalId String?
+  createdAt  DateTime @default(now())
+  invoices   Invoice[]
+
+  @@map("clients")
+}
+
+model Product {
+  id           Int      @id @default(autoincrement())
+  sku          String
+  name         String
+  generic      String?
+  brand        String?
+  line         String?
+  unit         String?
+  costPrice    Decimal  @db.Decimal(18, 2)
+  unitPrice    Decimal  @db.Decimal(18, 2)
+  salePrice1   Decimal  @db.Decimal(18, 2)
+  salePrice2   Decimal  @db.Decimal(18, 2)
+  stock        Decimal  @db.Decimal(18, 2)
+  supplier     String?
+  minQty       Int      @default(0)
+  maxQty       Int      @default(0)
+  unitsPerBox  Int      @default(0)
+  soldByUnit   Boolean  @default(false)
+  dispatchQty  Decimal  @default(0) @db.Decimal(18, 2)
+  warehouseQty Decimal  @default(0) @db.Decimal(18, 2)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  items        InvoiceItem[]
+  intakeLines  IntakeLine[]
+  writeOffs    WriteOff[]
+
+  @@index([sku])
+  @@index([name])
+  @@map("products")
+}
+
+model ProductBrand {
+  id   Int    @id @default(autoincrement())
+  name String @unique
+
+  @@map("product_brands")
+}
+
+model ProductCategory {
+  id   Int    @id @default(autoincrement())
+  name String @unique
+
+  @@map("product_categories")
+}
+
+model Invoice {
+  id             Int           @id @default(autoincrement())
+  number         Int
+  clientId       Int?
+  clientName     String
+  clientAddress  String?
+  paymentMethod  String
+  date           DateTime      @db.Date
+  dueDate        DateTime?     @db.Date
+  total          Decimal       @db.Decimal(18, 2)
+  cashierId      Int?
+  cashierName    String
+  profit         Decimal       @default(0) @db.Decimal(18, 2)
+  status         InvoiceStatus @default(PAID)
+  cashAmount     Decimal       @default(0) @db.Decimal(18, 2)
+  cardAmount     Decimal       @default(0) @db.Decimal(18, 2)
+  advanceAmount  Decimal       @default(0) @db.Decimal(18, 2)
+  createdAt      DateTime      @default(now())
+  client         Client?       @relation(fields: [clientId], references: [id])
+  cashier        User?         @relation(fields: [cashierId], references: [id])
+  items          InvoiceItem[]
+
+  @@index([date])
+  @@index([number])
+  @@index([cashierName])
+  @@index([paymentMethod])
+  @@map("invoices")
+}
+
+model InvoiceItem {
+  id          Int      @id @default(autoincrement())
+  invoiceId   Int
+  productId   Int?
+  sku         String
+  productName String
+  brand       String?
+  quantity      Decimal  @db.Decimal(18, 2)
+  unitPrice     Decimal  @db.Decimal(18, 2)
+  amount        Decimal  @db.Decimal(18, 2)
+  profit        Decimal  @default(0) @db.Decimal(18, 2)
+  percent       Decimal  @default(0) @db.Decimal(18, 2)
+  supplier      String?
+  fromDispatch  Decimal  @default(0) @db.Decimal(18, 2)
+  fromWarehouse Decimal  @default(0) @db.Decimal(18, 2)
+  invoice     Invoice  @relation(fields: [invoiceId], references: [id])
+  product     Product? @relation(fields: [productId], references: [id])
+
+  @@index([invoiceId])
+  @@map("invoice_items")
+}
+
+model ExchangeRate {
+  id        Int      @id @default(autoincrement())
+  rate      Decimal  @db.Decimal(18, 2)
+  updatedAt DateTime @updatedAt
+
+  @@map("exchange_rates")
+}
+
+model Company {
+  id      Int    @id @default(autoincrement())
+  name    String
+  address String?
+  phone   String?
+  ruc     String?
+  line1   String?
+  line2   String?
+
+  @@map("company")
+}
+
+model Intake {
+  id              Int          @id @default(autoincrement())
+  documentNumber  String       @default("0")
+  purchaseOrder   String?
+  billedAs        String       @default("Entrada")
+  supplier        String
+  date            DateTime     @db.Date
+  userName        String
+  total           Decimal      @db.Decimal(18, 2)
+  createdAt       DateTime     @default(now())
+  lines           IntakeLine[]
+
+  @@index([documentNumber])
+  @@index([date])
+  @@map("intakes")
+}
+
+model IntakeLine {
+  id              Int       @id @default(autoincrement())
+  intakeId        Int
+  productId       Int
+  sku             String
+  productName     String
+  generic         String?
+  brand           String?
+  line            String?
+  unit            String?
+  quantity        Decimal   @db.Decimal(18, 2)
+  costPrice       Decimal   @db.Decimal(18, 2)
+  unitsPerBox     Int       @default(1)
+  unitCost        Decimal   @db.Decimal(18, 2)
+  salePrice1      Decimal   @db.Decimal(18, 2)
+  salePrice2      Decimal   @db.Decimal(18, 2)
+  utilityPercent  Decimal   @db.Decimal(18, 2)
+  lot             String?
+  expiresAt       DateTime? @db.Date
+  destination     String    @default("dispatch")
+  amount          Decimal   @db.Decimal(18, 2)
+  intake          Intake    @relation(fields: [intakeId], references: [id], onDelete: Cascade)
+  product         Product   @relation(fields: [productId], references: [id])
+
+  @@index([intakeId])
+  @@index([sku])
+  @@index([expiresAt])
+  @@map("intake_lines")
+}
+
+model Supplier {
+  id        Int     @id @default(autoincrement())
+  code      Int     @default(0)
+  name      String
+  line      String?
+  contact   String?
+  address   String?
+  email     String?
+  phone     String?
+
+  @@map("suppliers")
+}
+
+model CreditRecord {
+  id            Int       @id @default(autoincrement())
+  clientCode    String?
+  clientName    String
+  invoiceNumber Int
+  billedAt      DateTime? @db.Date
+  dueAt         DateTime? @db.Date
+  status        String?
+  amount        Decimal   @db.Decimal(18, 2)
+  cashierName   String?
+
+  @@map("credit_records")
+}
+
+model Receipt {
+  id            Int       @id @default(autoincrement())
+  clientCode    Int?
+  clientName    String
+  invoiceNumber Int?
+  concept       String?
+  amount        Decimal   @db.Decimal(18, 2)
+  date          DateTime? @db.Date
+
+  @@map("receipts")
+}
+
+model CashEntry {
+  id                 Int       @id @default(autoincrement())
+  userName           String?
+  invoiceNumber      String?
+  income             Decimal   @default(0) @db.Decimal(18, 4)
+  operatingExpense   Decimal   @default(0) @db.Decimal(18, 4)
+  returnExpense      Decimal   @default(0) @db.Decimal(18, 4)
+  card               Decimal   @default(0) @db.Decimal(18, 4)
+  cardAuth           String?
+  date               DateTime? @db.Date
+
+  @@index([date])
+  @@map("cash_entries")
+}
+
+model WriteOff {
+  id            Int       @id @default(autoincrement())
+  productId     Int?
+  sku           String?
+  name          String?
+  brand         String?
+  quantity      Int       @default(0)
+  boxes         Int       @default(0)
+  unitsPerBox   Int       @default(0)
+  fromDispatch  Decimal   @default(0) @db.Decimal(18, 2)
+  fromWarehouse Decimal   @default(0) @db.Decimal(18, 2)
+  reason        String?
+  userName      String?
+  date          DateTime? @db.Date
+  product       Product?  @relation(fields: [productId], references: [id])
+
+  @@index([date])
+  @@index([sku])
+  @@map("write_offs")
+}
+
+model Transfer {
+  id          Int       @id @default(autoincrement())
+  sku         String?
+  productName String?
+  sender      String?
+  origin      String?
+  destination String?
+  quantity    Int       @default(0)
+  receiver    String?
+  reason      String?
+  date        DateTime? @db.Date
+
+  @@index([date])
+  @@map("transfers")
+}
+
+model InventoryHistory {
+  id             Int       @id @default(autoincrement())
+  sku            String?
+  productName    String?
+  brand          String?
+  supplier       String?
+  costPrice      Decimal   @default(0) @db.Decimal(18, 2)
+  salePrice      Decimal   @default(0) @db.Decimal(18, 2)
+  stockStart     Int       @default(0)
+  entries        Int       @default(0)
+  exits          Int       @default(0)
+  writeOffs      Int       @default(0)
+  stockEnd       Int       @default(0)
+
+  @@map("inventory_history")
+}
+
+model Payable {
+  id            Int       @id @default(autoincrement())
+  supplier      String?
+  concept       String?
+  invoiceNumber String?
+  balance       Decimal   @default(0) @db.Decimal(18, 2)
+  purchaseOrder String?
+  purchasedAt   DateTime? @db.Date
+  dueAt         DateTime? @db.Date
+  status        String?
+
+  @@map("payables")
+}
+
+model SupplierPayment {
+  id            Int       @id @default(autoincrement())
+  supplier      String?
+  invoiceNumber Int?
+  concept       String?
+  amount        Decimal   @default(0) @db.Decimal(18, 2)
+  date          DateTime? @db.Date
+
+  @@map("supplier_payments")
+}
+
+model ProductChangeLog {
+  id        Int       @id @default(autoincrement())
+  sku       String?
+  name      String?
+  userName  String?
+  date      DateTime? @db.Date
+
+  @@map("product_change_logs")
+}
+
+model ProductDeleteLog {
+  id        Int       @id @default(autoincrement())
+  sku       String?
+  name      String?
+  userName  String?
+  date      DateTime? @db.Date
+
+  @@map("product_delete_logs")
+}
+
+model ProductSnapshot {
+  id           Int     @id @default(autoincrement())
+  sku          String?
+  name         String?
+  generic      String?
+  brand        String?
+  line         String?
+  unit         String?
+  costPrice    Decimal @default(0) @db.Decimal(18, 2)
+  unitPrice    Decimal @default(0) @db.Decimal(18, 2)
+  salePrice1   Decimal @default(0) @db.Decimal(18, 2)
+  salePrice2   Decimal @default(0) @db.Decimal(18, 2)
+  stock        Decimal @default(0) @db.Decimal(18, 2)
+  supplier     String?
+  minQty       Int     @default(0)
+  maxQty       Int     @default(0)
+  unitsPerBox  Int     @default(0)
+  dispatchQty  Decimal @default(0) @db.Decimal(18, 2)
+  warehouseQty Decimal @default(0) @db.Decimal(18, 2)
+
+  @@map("product_snapshots")
+}
+
+model AppConfig {
+  id        Int       @id @default(autoincrement())
+  theme     String?
+  startedAt DateTime? @db.Date
+  client    String?
+  business  String?
+
+  @@map("app_config")
+}

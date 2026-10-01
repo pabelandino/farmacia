@@ -1,0 +1,40 @@
+{
+  "id": "/",
+  "name": "Elsa SYS",
+  "short_name": "Elsa SYS",
+  "description": "Farmacia Matute Molina",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": ["window-controls-overlay", "standalone"],
+  "orientation": "any",
+  "lang": "es",
+  "dir": "ltr",
+  "background_color": "#eef6f4",
+  "theme_color": "#0f172a",
+  "prefer_related_applications": false,
+  "categories": ["business", "medical"],
+  "launch_handler": {
+    "client_mode": ["focus-existing", "auto"]
+  },
+  "icons": [
+    {
+      "src": "/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-512-maskable.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}

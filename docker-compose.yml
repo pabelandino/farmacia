@@ -1,0 +1,48 @@
+name: elsasoft
+
+services:
+  mssql:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    platform: linux/amd64
+    container_name: elsasoft-mssql
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD:-FarmaPlus_Restore_2026!}
+      MSSQL_PID: Developer
+    ports:
+      - "${MSSQL_PORT:-1433}:1433"
+    volumes:
+      - mssql-data:/var/opt/mssql
+      - ./backups:/var/opt/mssql/backup
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P \"$$MSSQL_SA_PASSWORD\" -C -Q 'SELECT 1' || exit 1",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 40s
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: elsasoft-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-farmacia}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-farmacia}
+      POSTGRES_DB: ${POSTGRES_DB:-farmaplus}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-farmacia} -d ${POSTGRES_DB:-farmaplus}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  mssql-data:
+  postgres-data:

@@ -1,0 +1,22 @@
+{
+  "name": "farmaplus",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "apps/api",
+    "apps/web",
+    "packages/domain"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspaces --if-present",
+    "dev:api": "npm run dev -w api",
+    "dev:web": "npm run dev -w web",
+    "build": "npm run build -w web",
+    "start:prod": "npx tsx --tsconfig apps/api/tsconfig.json apps/api/src/main.ts",
+    "start:local": "npm run build && HOST=0.0.0.0 PORT=3001 WEB_DIST=apps/web/dist npm run start:prod",
+    "start:windows": "docker compose -p elsasoft -f docker-compose.yml -f docker-compose.prod.yml up -d postgres app",
+    "migrate:legacy": "npm run migrate:legacy -w api",
+    "db:push": "npm run db:push -w api",
+    "test:domain": "npm run test -w @farmaplus/domain"
+  }
+}

@@ -1,0 +1,19 @@
+---
+description: Always apply the project React best-practices skill for Farma Plus UI work.
+globs: apps/web/**/*.{ts,tsx,css}
+alwaysApply: false
+---
+
+# React UI — always use the project skill
+
+Before writing or refactoring UI in `apps/web`, read and follow `.cursor/skills/react-best-practices/SKILL.md`.
+
+That skill is the Vercel/aitmpl React performance rule set (waterfalls, bundles, re-renders, rendering, JS). Load `references/react-performance-guidelines.md` for the category you are touching and `references/farmaplus-web.md` for this repo's folders.
+
+## Non-negotiables
+
+- Split pages, components, hooks, utils, and API. Do not grow god-files.
+- Business formulas belong in `@farmaplus/domain`, not in React components.
+- Import modules directly (no new barrel `index.ts` files).
+- Keep Tailwind, submit spinners, and mobile layout. Do not change product behavior.
+- Skip Next.js-only APIs unless this app actually uses Next.js.

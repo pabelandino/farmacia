@@ -1,0 +1,12 @@
+node_modules
+.git
+graphify-out
+backups
+*.bak
+*.exe
+apps/web/dist
+apps/api/dist
+**/.DS_Store
+**/Captura*
+.env
+.env.local

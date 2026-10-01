@@ -1,0 +1,475 @@
+export {
+  CASHIER_DEFAULTS,
+  PERMISSION_KEYS,
+  allPermissions,
+  hasAnyPermission,
+  hasPermission,
+  homePath,
+  normalizePermissions,
+} from './permissions';
+export type { PermissionKey, PermissionMap } from './permissions';
+
+/** WinForms FarmaPlusV2 pricing and stock formulas. */
+
+export function roundMoney(value: number, digits = 2): number {
+  const factor = 10 ** digits;
+  return Math.round((value + Number.EPSILON) * factor) / factor;
+}
+
+/** Importe = Precio × Cantidad */
+export function lineAmount(price: number, quantity: number): number {
+  return roundMoney(price * quantity);
+}
+
+/** Total USD = Total C$ / tipo de cambio (display only). */
+export function totalUsd(totalCs: number, exchangeRate: number): number {
+  if (!exchangeRate) return 0;
+  return roundMoney(totalCs / exchangeRate);
+}
+
+/** Ganancia = (Precio − PrecioUnidad) × Cantidad */
+export function lineProfit(salePrice: number, unitCost: number, quantity: number): number {
+  return roundMoney((salePrice - unitCost) * quantity);
+}
+
+/**
+ * Markup on cost, matching DETALLE_VENTAS.Porcentaje:
+ * (Precio − PrecioUnidad) / PrecioUnidad × 100
+ */
+export function markupPercent(salePrice: number, unitCost: number): number {
+  if (unitCost <= 0) return 0;
+  return roundMoney(((salePrice - unitCost) / unitCost) * 100);
+}
+
+/** PrecioUnidad = PrecioCompra / UnidadesCaja */
+export function unitCostFromBox(purchasePrice: number, unitsPerBox: number): number {
+  const units = unitsPerBox > 0 ? unitsPerBox : 1;
+  return roundMoney(purchasePrice / units);
+}
+
+/** Unidades a ingresar = Cajas a ingresar × Unidades/caja */
+export function intakeQtyFromBoxes(boxes: number, unitsPerBox: number): number {
+  const perBox = Number(unitsPerBox) > 0 ? Number(unitsPerBox) : 1;
+  return roundMoney((Number(boxes) || 0) * perBox);
+}
+
+/** Reverse of intakeQtyFromBoxes when reopening a saved intake line. */
+export function intakeBoxesFromQty(quantity: number, unitsPerBox: number): number {
+  const perBox = Number(unitsPerBox) > 0 ? Number(unitsPerBox) : 1;
+  return roundMoney((Number(quantity) || 0) / perBox);
+}
+
+export function applyIntakeBoxes<T extends { boxes: number; unitsPerBox: number; quantity: number }>(line: T): T {
+  return { ...line, quantity: intakeQtyFromBoxes(line.boxes, line.unitsPerBox) };
+}
+
+/** When Unidades a ingresar is typed, keep boxes in sync: Cajas = Unidades / Unidades/caja. */
+export function applyIntakeQuantity<T extends { boxes: number; unitsPerBox: number; quantity: number }>(line: T): T {
+  return { ...line, boxes: intakeBoxesFromQty(line.quantity, line.unitsPerBox) };
+}
+
+/**
+ * Qty to add when the cashier picks one box/bottle.
+ * Unit-sale products (Diamel): the bottle contains N pieces, so qty = N.
+ * Pack-only products: the bottle is the sale unit, so qty = 1.
+ */
+export function packSaleQty(unitsPerBox: number, soldByUnit = false): number {
+  if (!soldByUnit) return 1;
+  const perBox = Math.floor(Number(unitsPerBox) || 0);
+  return perBox > 1 ? perBox : 1;
+}
+
+export function canSplitPackSale(unitsPerBox: number, soldByUnit: boolean): boolean {
+  return soldByUnit && packSaleQty(unitsPerBox, true) > 1;
+}
+
+/**
+ * Infer whether P1 is a per-piece price (closer to PrecioUnidad)
+ * or a whole-box/bottle price (closer to PrecioCompra / pack equivalent).
+ */
+export function inferSoldByUnit(input: {
+  salePrice: number;
+  unitCost: number;
+  costPrice: number;
+  unitsPerBox: number;
+}): boolean {
+  const perBox = Math.floor(Number(input.unitsPerBox) || 0);
+  if (perBox <= 1) return false;
+  const sale = Number(input.salePrice) || 0;
+  const unit = Number(input.unitCost) || 0;
+  const box = Number(input.costPrice) || 0;
+  if (sale <= 0) return false;
+  const packEquiv = unit > 0 ? unit * perBox : box;
+  const distUnit = Math.abs(sale - unit);
+  const distPack = Math.abs(sale - packEquiv);
+  const distBox = Math.abs(sale - box);
+  return distUnit < distPack && distUnit <= distBox;
+}
+
+/** Total ingreso = PrecioUnidad × CantidadEntrada */
+export function intakeTotal(unitCost: number, quantity: number): number {
+  return roundMoney(unitCost * quantity);
+}
+
+/** PrecioVenta ≈ round(PrecioUnidad × (1 + utilidad%)) */
+export function salePriceFromMarkup(unitCost: number, utilityPercent: number): number {
+  return Math.round(unitCost * (1 + utilityPercent / 100));
+}
+
+export const DEFAULT_UTILITY_PERCENT = 20;
+
+/** Windows Creación de Productos default % Utilidad. */
+export const DEFAULT_PRODUCT_UTILITY_PERCENT = 30;
+
+/** Markup choices on the new-product form (10, 15, … 100). */
+export const UTILITY_PERCENT_OPTIONS = Array.from({ length: 19 }, (_, i) => 10 + i * 5);
+
+/** Windows UM dropdown on Creación de Productos. */
+export const PRODUCT_UNITS = ['Unidad', 'Frasco', 'Tabletas', 'Ampollas', 'Cápsulas'] as const;
+
+/**
+ * Dispatch to show/sell: prefer Despacho. If it is 0, treat stock as
+ * Existencia (legacy) and subtract Bodega, otherwise use stock as dispatch.
+ */
+export function productDispatchQty(stock: number, dispatchQty: number, warehouseQty = 0): number {
+  const dispatch = Number(dispatchQty) || 0;
+  if (dispatch > 0) return dispatch;
+  const warehouse = Number(warehouseQty) || 0;
+  const total = Number(stock) || 0;
+  if (warehouse > 0 && total >= warehouse) return Number((total - warehouse).toFixed(2));
+  return total;
+}
+
+/** Cambio = max(recibido − total, 0). Display helper matching POS cash+card. */
+export function changeDue(received: number, total: number): number {
+  return Math.max(received - total, 0);
+}
+
+/** How a Contado sale was tendered. Credit invoices stay 'credit'. */
+export type TenderKind = 'cash' | 'card' | 'mixed' | 'credit';
+
+export function tenderKind(cashAmount: number, cardAmount: number, paymentMethod?: string): TenderKind {
+  if (paymentMethod === 'Credito') return 'credit';
+  const cash = Number(cashAmount) > 0.009;
+  const card = Number(cardAmount) > 0.009;
+  if (cash && card) return 'mixed';
+  if (card) return 'card';
+  return 'cash';
+}
+
+/** Saldo crédito = max(total − adelanto, 0). */
+export function remainingBalance(total: number, advance: number): number {
+  return Math.max(total - advance, 0);
+}
+
+export type IntakePricingFields = {
+  costPrice: number;
+  unitsPerBox: number;
+  unitCost: number;
+  salePrice1: number;
+  salePrice2: number;
+  utilityPercent: number;
+  quantity: number;
+  amount: number;
+};
+
+/**
+ * Recalculate unit cost, sale prices, and line amount for an intake row.
+ * When fromCost is true, PrecioUnidad and P1 come from cost + markup.
+ */
+export function recalcIntakePricing<T extends IntakePricingFields>(line: T, fromCost = true): T {
+  const unitCost = fromCost ? unitCostFromBox(line.costPrice, line.unitsPerBox) : line.unitCost;
+  const salePrice1 = fromCost ? salePriceFromMarkup(unitCost, line.utilityPercent) : line.salePrice1;
+  const salePrice2 = fromCost ? salePrice1 : line.salePrice2;
+  return { ...line, unitCost, salePrice1, salePrice2, amount: intakeTotal(unitCost, line.quantity) };
+}
+
+/** Alert window for expired / near-expiry lots (intake Vencimiento). */
+export const EXPIRY_ALERT_MONTHS = 3;
+
+/** Shift an ISO date (YYYY-MM-DD) by whole calendar months in UTC. */
+export function addCalendarMonths(isoDate: string, months: number): string {
+  const [year, month, day] = isoDate.split('-').map(Number);
+  if (!year || !month || !day) return isoDate;
+  const utc = new Date(Date.UTC(year, month - 1 + months, day));
+  return utc.toISOString().slice(0, 10);
+}
+
+/** Default report range: from 3 months ago through today. */
+export function expiryWindow(asOfIso: string, months = EXPIRY_ALERT_MONTHS) {
+  return {
+    from: addCalendarMonths(asOfIso, -months),
+    to: asOfIso,
+  };
+}
+
+export type ExpiryStatus = 'expired' | 'today' | 'upcoming';
+
+export function expiryStatus(expiresAtIso: string, asOfIso: string): ExpiryStatus {
+  if (expiresAtIso < asOfIso) return 'expired';
+  if (expiresAtIso === asOfIso) return 'today';
+  return 'upcoming';
+}
+
+export type LotQty = {
+  id: number;
+  quantity: number;
+  expiresAt: string | null;
+};
+
+/** FEFO: sales consume the oldest expiration first. remainingStock is current physical stock. */
+export function allocateLotRemainings<T extends LotQty>(lots: readonly T[], remainingStock: number): Array<T & { remaining: number }> {
+  const received = lots.reduce((sum, lot) => sum + (Number(lot.quantity) || 0), 0);
+  let toConsume = Math.max(0, received - Math.max(0, Number(remainingStock) || 0));
+  const ordered = [...lots].sort((a, b) => {
+    if (!a.expiresAt && !b.expiresAt) return a.id - b.id;
+    if (!a.expiresAt) return 1;
+    if (!b.expiresAt) return -1;
+    if (a.expiresAt !== b.expiresAt) return a.expiresAt < b.expiresAt ? -1 : 1;
+    return a.id - b.id;
+  });
+  return ordered.map((lot) => {
+    const qty = Number(lot.quantity) || 0;
+    const consumed = Math.min(qty, toConsume);
+    toConsume -= consumed;
+    return { ...lot, remaining: Number((qty - consumed).toFixed(2)) };
+  });
+}
+
+/** True when the new sale price differs from the previous one. */
+export function salePriceChanged(previousPrice: number, nextPrice: number): boolean {
+  return Math.abs((Number(previousPrice) || 0) - (Number(nextPrice) || 0)) > 0.009;
+}
+
+/**
+ * Same P2 as previous P1: new units join dispatch.
+ * Different P2: new units go to warehouse and dispatch stays as-is.
+ */
+export function intakeDestination(previousPrice: number, nextPrice: number): 'dispatch' | 'warehouse' {
+  return salePriceChanged(previousPrice, nextPrice) ? 'warehouse' : 'dispatch';
+}
+
+/** Physical existence = dispatch stock + warehouse. */
+export function existenceQty(stock: number, warehouseQty: number): number {
+  return Number(((Number(stock) || 0) + (Number(warehouseQty) || 0)).toFixed(2));
+}
+
+/** What on-hand stock cost vs what it would sell for (higher of P1/P2). */
+export function inventoryLineValue(input: {
+  stock: number;
+  dispatchQty: number;
+  warehouseQty: number;
+  costPrice: number;
+  unitPrice: number;
+  unitsPerBox: number;
+  salePrice1: number;
+  salePrice2: number;
+}) {
+  const bins = productBins(input.stock, input.dispatchQty, input.warehouseQty);
+  const unitCost = Number(input.costPrice) > 0
+    ? unitCostFromBox(input.costPrice, input.unitsPerBox || 1)
+    : Number(input.unitPrice) || 0;
+  const unitSale = higherSalePrice(Number(input.salePrice1), Number(input.salePrice2));
+  return {
+    existence: bins.existence,
+    unitCost: roundMoney(unitCost),
+    unitSale: roundMoney(unitSale),
+    costAmount: lineAmount(unitCost, bins.existence),
+    saleAmount: lineAmount(unitSale, bins.existence),
+    profitAmount: lineProfit(unitSale, unitCost, bins.existence),
+  };
+}
+
+export function sumInventoryValues(lines: ReadonlyArray<{ existence: number; costAmount: number; saleAmount: number; profitAmount: number }>) {
+  return lines.reduce(
+    (acc, line) => ({
+      existence: roundMoney(acc.existence + line.existence),
+      costAmount: roundMoney(acc.costAmount + line.costAmount),
+      saleAmount: roundMoney(acc.saleAmount + line.saleAmount),
+      profitAmount: roundMoney(acc.profitAmount + line.profitAmount),
+    }),
+    { existence: 0, costAmount: 0, saleAmount: 0, profitAmount: 0 },
+  );
+}
+
+export function productBins(stock: number, dispatchQty: number, warehouseQty: number) {
+  const warehouse = Number(warehouseQty) || 0;
+  const dispatch = productDispatchQty(stock, dispatchQty, warehouse);
+  return { dispatch, warehouse, existence: existenceQty(dispatch, warehouse) };
+}
+
+/** After an intake: existence is always next dispatch + next warehouse. */
+export function nextIntakeBins(
+  dispatchQty: number,
+  warehouseQty: number,
+  quantity: number,
+  destination: 'dispatch' | 'warehouse',
+) {
+  const qty = Number(quantity) || 0;
+  const dispatch = Number(dispatchQty) || 0;
+  const warehouse = Number(warehouseQty) || 0;
+  const nextDispatch = destination === 'warehouse' ? dispatch : dispatch + qty;
+  const nextWarehouse = destination === 'warehouse' ? warehouse + qty : warehouse;
+  return { dispatch: nextDispatch, warehouse: nextWarehouse, existence: existenceQty(nextDispatch, nextWarehouse) };
+}
+
+/** Sales consume dispatch first, then warehouse. */
+export function consumeDispatchFirst(dispatchQty: number, warehouseQty: number, sold: number) {
+  const qty = Math.max(0, Number(sold) || 0);
+  const dispatch = Math.max(0, Number(dispatchQty) || 0);
+  const warehouse = Math.max(0, Number(warehouseQty) || 0);
+  const fromDispatch = Math.min(dispatch, qty);
+  const fromWarehouse = Math.min(warehouse, qty - fromDispatch);
+  return {
+    fromDispatch,
+    fromWarehouse,
+    dispatchQty: Number((dispatch - fromDispatch).toFixed(2)),
+    warehouseQty: Number((warehouse - fromWarehouse).toFixed(2)),
+  };
+}
+
+/**
+ * Qty to put back on void. Prefer the split stored at sale time.
+ * Legacy lines without a split go to dispatch, unless the line price matches warehouse P2.
+ */
+export function voidRestoreSplit(input: {
+  quantity: number;
+  fromDispatch?: number | null;
+  fromWarehouse?: number | null;
+  unitPrice?: number;
+  salePrice1?: number;
+  salePrice2?: number;
+}) {
+  const storedDispatch = Math.max(0, Number(input.fromDispatch) || 0);
+  const storedWarehouse = Math.max(0, Number(input.fromWarehouse) || 0);
+  if (storedDispatch + storedWarehouse > 0.009) {
+    return { fromDispatch: storedDispatch, fromWarehouse: storedWarehouse };
+  }
+  const qty = Math.max(0, Number(input.quantity) || 0);
+  const p1 = Number(input.salePrice1) || 0;
+  const p2 = Number(input.salePrice2) || 0;
+  const price = Number(input.unitPrice) || 0;
+  const warehousePriced = p2 > 0 && Math.abs(p1 - p2) > 0.009 && Math.abs(price - p2) <= 0.009;
+  if (warehousePriced) return { fromDispatch: 0, fromWarehouse: qty };
+  return { fromDispatch: qty, fromWarehouse: 0 };
+}
+
+export type SaleBin = 'dispatch' | 'warehouse';
+
+export type PricedSaleShare = {
+  bin: SaleBin;
+  quantity: number;
+  price: number;
+};
+
+/** After a price-change intake, the catalog keeps P1 on dispatch and stores P2 as the new warehouse price. */
+export function catalogPricesAfterIntake(previousPrice: number, nextPrice: number) {
+  const destination = intakeDestination(previousPrice, nextPrice);
+  const salePrice2 = Number(nextPrice) || 0;
+  return {
+    destination,
+    salePrice1: destination === 'warehouse' ? Number(previousPrice) || 0 : salePrice2,
+    salePrice2,
+  };
+}
+
+export function higherSalePrice(salePrice1: number, salePrice2: number): number {
+  return Math.max(Number(salePrice1) || 0, Number(salePrice2) || 0);
+}
+
+export function isHigherSalePrice(price: number, salePrice1: number, salePrice2: number): boolean {
+  const value = Number(price) || 0;
+  return value > 0 && Math.abs(value - higherSalePrice(salePrice1, salePrice2)) <= 0.009;
+}
+
+export function binSalePrice(bin: SaleBin, salePrice1: number, salePrice2: number): number {
+  const p1 = Number(salePrice1) || 0;
+  const p2 = Number(salePrice2) || p1;
+  return bin === 'warehouse' ? p2 : p1;
+}
+
+function mergeSamePriceShares(shares: PricedSaleShare[]): PricedSaleShare[] {
+  if (shares.length < 2) return shares;
+  if (salePriceChanged(shares[0].price, shares[1].price)) return shares;
+  return [{
+    bin: shares[0].bin,
+    quantity: Number((shares[0].quantity + shares[1].quantity).toFixed(2)),
+    price: shares[0].price,
+  }];
+}
+
+/**
+ * Dispatch still consumes first, then warehouse, but the billed price is always
+ * the higher of P1 and P2.
+ */
+export function splitSaleByPrice(
+  dispatchQty: number,
+  warehouseQty: number,
+  sold: number,
+  salePrice1: number,
+  salePrice2: number,
+): PricedSaleShare[] {
+  const split = consumeDispatchFirst(dispatchQty, warehouseQty, sold);
+  const price = higherSalePrice(salePrice1, salePrice2);
+  const shares: PricedSaleShare[] = [];
+  if (split.fromDispatch > 0) {
+    shares.push({ bin: 'dispatch', quantity: split.fromDispatch, price });
+  }
+  if (split.fromWarehouse > 0) {
+    shares.push({ bin: 'warehouse', quantity: split.fromWarehouse, price });
+  }
+  return mergeSamePriceShares(shares);
+}
+
+export function isOutOfStock(existence: number): boolean {
+  return (Number(existence) || 0) <= 0.009;
+}
+
+/** Split stock into boxes × units-per-box plus leftover units. */
+export function splitPack(stock: number, unitsPerBox: number) {
+  const qty = Number(stock) || 0;
+  const perBox = Number(unitsPerBox) || 0;
+  if (perBox <= 0) {
+    return { boxes: 0, loose: qty, packLabel: String(qty) };
+  }
+  const boxes = Math.floor(qty / perBox);
+  const loose = Number((qty - boxes * perBox).toFixed(2));
+  return {
+    boxes,
+    loose,
+    packLabel: loose ? `${boxes} x ${perBox} + ${loose}` : `${boxes} x ${perBox}`,
+  };
+}
+
+/** Write off complete boxes only; leftover units in an open pack stay in stock. */
+export function writeOffFullBoxes(
+  dispatchQty: number,
+  warehouseQty: number,
+  unitsPerBox: number,
+  boxes: number,
+) {
+  const perBox = Number(unitsPerBox) > 0 ? Number(unitsPerBox) : 1;
+  const existence = existenceQty(dispatchQty, warehouseQty);
+  const pack = splitPack(existence, perBox);
+  const requested = Math.max(0, Math.floor(Number(boxes) || 0));
+  if (requested < 1) {
+    return { ok: false as const, error: 'boxesRequired' as const, pack, units: 0 };
+  }
+  if (requested > pack.boxes) {
+    return { ok: false as const, error: 'tooManyBoxes' as const, pack, units: 0 };
+  }
+  const units = requested * perBox;
+  const next = consumeDispatchFirst(dispatchQty, warehouseQty, units);
+  return {
+    ok: true as const,
+    pack,
+    nextPack: splitPack(existenceQty(next.dispatchQty, next.warehouseQty), perBox),
+    boxes: requested,
+    units,
+    fromDispatch: next.fromDispatch,
+    fromWarehouse: next.fromWarehouse,
+    dispatchQty: next.dispatchQty,
+    warehouseQty: next.warehouseQty,
+  };
+}
+

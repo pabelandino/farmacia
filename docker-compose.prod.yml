@@ -1,0 +1,21 @@
+# Local Windows / LAN install. Postgres stays on this PC; phones use http://<PC-IP>/
+# Usage: docker compose -p elsasoft -f docker-compose.yml -f docker-compose.prod.yml up -d postgres app
+services:
+  app:
+    build: .
+    image: elsasoft-app:latest
+    container_name: elsasoft-app
+    restart: unless-stopped
+    ports:
+      - "${APP_PORT:-80}:3001"
+    environment:
+      HOST: 0.0.0.0
+      PORT: 3001
+      WEB_DIST: /app/apps/web/dist
+      DATABASE_URL: postgresql://${POSTGRES_USER:-farmacia}:${POSTGRES_PASSWORD:-farmacia}@postgres:5432/${POSTGRES_DB:-farmaplus}
+      JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
+      MSSQL_SERVER: mssql
+      MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD:-FarmaPlus_Restore_2026!}
+    depends_on:
+      postgres:
+        condition: service_healthy
