@@ -1,6 +1,7 @@
-import { Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import {
   DEFAULT_UTILITY_PERCENT,
+  applyIntakeWithRemaining,
   catalogPricesAfterIntake,
   intakeTotal,
   salePriceFromMarkup,
@@ -96,7 +97,7 @@ export class IntakesService {
         userName,
         total,
         lines: {
-          create: prepared.map(({ product, ...line }) => ({
+          create: prepared.map(({ product, physicalRemaining: _physicalRemaining, ...line }) => ({
             ...line,
             productId: product.id,
           })),
@@ -105,7 +106,7 @@ export class IntakesService {
       include: { lines: true },
     });
     for (const line of prepared) {
-      await this.applyStock(tx, line.product.id, line.quantity, line.destination);
+      await this.applyLineStock(tx, line.product.id, line.quantity, line.destination, line.physicalRemaining);
     }
     return intake;
   }
@@ -164,6 +165,7 @@ export class IntakesService {
 
     return {
       product,
+      physicalRemaining: line.physicalRemaining,
       sku: line.sku,
       productName: line.productName,
       generic: line.generic || null,
@@ -182,6 +184,41 @@ export class IntakesService {
       destination,
       amount,
     };
+  }
+
+  private async applyLineStock(
+    tx: Prisma.TransactionClient,
+    productId: number,
+    qty: number,
+    destination: string,
+    physicalRemaining?: number,
+  ) {
+    if (physicalRemaining != null) {
+      const product = await tx.product.findUnique({ where: { id: productId } });
+      if (!product) throw new NotFoundException('Producto no encontrado');
+      const result = applyIntakeWithRemaining(
+        Number(product.dispatchQty),
+        Number(product.warehouseQty),
+        qty,
+        destination === 'warehouse' ? 'warehouse' : 'dispatch',
+        physicalRemaining,
+        product.unitsPerBox,
+      );
+      if (!result.ok) {
+        throw new BadRequestException('No puede quedar más de lo que hay ahora');
+      }
+      if (result.wroteOff > 0) {
+        await tx.product.update({
+          where: { id: productId },
+          data: {
+            stock: { decrement: result.fromDispatch },
+            dispatchQty: { decrement: result.fromDispatch },
+            warehouseQty: { decrement: result.fromWarehouse },
+          },
+        });
+      }
+    }
+    return this.applyStock(tx, productId, qty, destination);
   }
 
   private applyStock(

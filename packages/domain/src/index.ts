@@ -473,3 +473,73 @@ export function writeOffFullBoxes(
   };
 }
 
+/** Set existence to a physical count. Writes off (existencia − remaining), dispatch first. */
+export function writeOffToRemaining(
+  dispatchQty: number,
+  warehouseQty: number,
+  remaining: number,
+  unitsPerBox = 1,
+) {
+  const perBox = Number(unitsPerBox) > 0 ? Number(unitsPerBox) : 1;
+  const existence = existenceQty(dispatchQty, warehouseQty);
+  const pack = splitPack(existence, perBox);
+  const target = Math.max(0, Number(remaining) || 0);
+  if (target > existence + 0.009) {
+    return { ok: false as const, error: 'remainingTooHigh' as const, pack, units: 0 };
+  }
+  const units = Number((existence - target).toFixed(2));
+  if (units <= 0.009) {
+    return { ok: false as const, error: 'nothingToAdjust' as const, pack, units: 0 };
+  }
+  const next = consumeDispatchFirst(dispatchQty, warehouseQty, units);
+  return {
+    ok: true as const,
+    pack,
+    nextPack: splitPack(existenceQty(next.dispatchQty, next.warehouseQty), perBox),
+    boxes: 0,
+    units,
+    remaining: Number(target.toFixed(2)),
+    fromDispatch: next.fromDispatch,
+    fromWarehouse: next.fromWarehouse,
+    dispatchQty: next.dispatchQty,
+    warehouseQty: next.warehouseQty,
+  };
+}
+
+/**
+ * Intake after an optional physical count: write off (existencia − remaining),
+ * then add the new quantity with the existing destination rule.
+ */
+export function applyIntakeWithRemaining(
+  dispatchQty: number,
+  warehouseQty: number,
+  quantity: number,
+  destination: 'dispatch' | 'warehouse',
+  remaining?: number | null,
+  unitsPerBox = 1,
+) {
+  const existence = existenceQty(dispatchQty, warehouseQty);
+  const hasRemaining = remaining != null && Number.isFinite(Number(remaining));
+  if (hasRemaining && Number(remaining) > existence + 0.009) {
+    return { ok: false as const, error: 'remainingTooHigh' as const };
+  }
+  const adjust = hasRemaining
+    ? writeOffToRemaining(dispatchQty, warehouseQty, Number(remaining), unitsPerBox)
+    : { ok: false as const, error: 'nothingToAdjust' as const };
+  const afterDispatch = adjust.ok ? adjust.dispatchQty : Number(dispatchQty) || 0;
+  const afterWarehouse = adjust.ok ? adjust.warehouseQty : Number(warehouseQty) || 0;
+  return {
+    ok: true as const,
+    wroteOff: adjust.ok ? adjust.units : 0,
+    remaining: adjust.ok ? adjust.remaining : existence,
+    fromDispatch: adjust.ok ? adjust.fromDispatch : 0,
+    fromWarehouse: adjust.ok ? adjust.fromWarehouse : 0,
+    afterAdjust: {
+      dispatch: afterDispatch,
+      warehouse: afterWarehouse,
+      existence: existenceQty(afterDispatch, afterWarehouse),
+    },
+    bins: nextIntakeBins(afterDispatch, afterWarehouse, quantity, destination),
+  };
+}
+

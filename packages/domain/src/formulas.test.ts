@@ -27,6 +27,8 @@ import {
   allocateLotRemainings,
   consumeDispatchFirst,
   writeOffFullBoxes,
+  writeOffToRemaining,
+  applyIntakeWithRemaining,
   voidRestoreSplit,
   existenceQty,
   intakeDestination,
@@ -152,6 +154,65 @@ describe('FarmaPlusV2 formulas vs restored SQL data', () => {
     assert.equal(writeOffFullBoxes(50, 0, 12, 0).ok, false);
   });
 
+  it('writeOffToRemaining zeros leftovers or matches a physical count', () => {
+    const zero = writeOffToRemaining(26, 0, 0, 30);
+    assert.equal(zero.ok, true);
+    if (zero.ok) {
+      assert.equal(zero.units, 26);
+      assert.equal(zero.dispatchQty, 0);
+      assert.equal(zero.remaining, 0);
+    }
+    const keep20 = writeOffToRemaining(26, 0, 20, 30);
+    assert.equal(keep20.ok, true);
+    if (keep20.ok) {
+      assert.equal(keep20.units, 6);
+      assert.equal(keep20.dispatchQty, 20);
+    }
+    const split = writeOffToRemaining(20, 6, 0, 30);
+    assert.equal(split.ok, true);
+    if (split.ok) {
+      assert.equal(split.fromDispatch, 20);
+      assert.equal(split.fromWarehouse, 6);
+    }
+    assert.equal(writeOffToRemaining(26, 0, 26, 30).ok, false);
+    assert.equal(writeOffToRemaining(26, 0, 30, 30).ok, false);
+  });
+
+  it('applyIntakeWithRemaining writes off leftovers then adds the intake', () => {
+    const zeroThen30 = applyIntakeWithRemaining(26, 0, 30, 'dispatch', 0, 30);
+    assert.equal(zeroThen30.ok, true);
+    if (zeroThen30.ok) {
+      assert.equal(zeroThen30.wroteOff, 26);
+      assert.equal(zeroThen30.bins.existence, 30);
+      assert.equal(zeroThen30.bins.dispatch, 30);
+    }
+    const keep20Then30 = applyIntakeWithRemaining(26, 0, 30, 'dispatch', 20, 30);
+    assert.equal(keep20Then30.ok, true);
+    if (keep20Then30.ok) {
+      assert.equal(keep20Then30.wroteOff, 6);
+      assert.equal(keep20Then30.bins.existence, 50);
+    }
+    const noAdjust = applyIntakeWithRemaining(26, 0, 30, 'dispatch');
+    assert.equal(noAdjust.ok, true);
+    if (noAdjust.ok) {
+      assert.equal(noAdjust.wroteOff, 0);
+      assert.equal(noAdjust.bins.existence, 56);
+    }
+    const sameCount = applyIntakeWithRemaining(26, 0, 30, 'dispatch', 26, 30);
+    assert.equal(sameCount.ok, true);
+    if (sameCount.ok) {
+      assert.equal(sameCount.wroteOff, 0);
+      assert.equal(sameCount.bins.existence, 56);
+    }
+    const toWarehouse = applyIntakeWithRemaining(26, 0, 30, 'warehouse', 0, 30);
+    assert.equal(toWarehouse.ok, true);
+    if (toWarehouse.ok) {
+      assert.equal(toWarehouse.bins.dispatch, 0);
+      assert.equal(toWarehouse.bins.warehouse, 30);
+    }
+    assert.equal(applyIntakeWithRemaining(26, 0, 30, 'dispatch', 30, 30).ok, false);
+  });
+
   it('Intake line recalc derives unit cost, P1, and amount from cost', () => {
     const next = recalcIntakePricing({
       costPrice: 774.99,
@@ -226,6 +287,22 @@ describe('FarmaPlusV2 formulas vs restored SQL data', () => {
       fromDispatch: 0,
       fromWarehouse: 10,
     });
+  });
+
+  it('physical remaining reallocates leftover lots to 0 or a counted qty', () => {
+    const lot = { id: 1, quantity: 26, expiresAt: '2026-12-01' };
+    assert.equal(allocateLotRemainings([lot], 0)[0].remaining, 0);
+    assert.equal(allocateLotRemainings([lot], 10)[0].remaining, 10);
+    assert.equal(allocateLotRemainings([lot], 26)[0].remaining, 26);
+    const split = allocateLotRemainings(
+      [
+        { id: 1, quantity: 20, expiresAt: '2026-06-01' },
+        { id: 2, quantity: 6, expiresAt: '2027-01-01' },
+      ],
+      10,
+    );
+    assert.equal(split[0].remaining, 4);
+    assert.equal(split[1].remaining, 6);
   });
 
   it('FEFO keeps leftover of the older lot and does not overwrite a newer expiration', () => {

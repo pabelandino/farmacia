@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
-import { applyIntakeBoxes, applyIntakeQuantity, DEFAULT_UTILITY_PERCENT, existenceQty, intakeBoxesFromQty, intakeDestination, isHigherSalePrice, markupPercent, nextIntakeBins, productBins, recalcIntakePricing, unitCostFromBox } from '@farmaplus/domain';
+import { allocateLotRemainings, applyIntakeBoxes, applyIntakeQuantity, applyIntakeWithRemaining, DEFAULT_UTILITY_PERCENT, existenceQty, intakeBoxesFromQty, intakeDestination, isHigherSalePrice, markupPercent, productBins, recalcIntakePricing, splitPack, unitCostFromBox } from '@farmaplus/domain';
 import { api } from '../api/client';
 import { DateInput } from '../components/DateInput';
 import { ExistingLotsPanel } from '../components/ExistingLotsPanel';
@@ -22,7 +22,7 @@ import { useProductSearch } from '../hooks/useProductSearch';
 import { Product } from '../types/catalog';
 import { Intake, IntakeLine, ProductLot, ProductLots } from '../types/intakes';
 import { dateOnly, formatReportDate, todayIso } from '../utils/dates';
-import { formatMoney, toNumber } from '../utils/numbers';
+import { formatMoney, formatQty, toNumber } from '../utils/numbers';
 
 const emptyLine = (): IntakeLine => ({
   sku: '', productName: '', generic: '', brand: '', line: '', unit: 'Unidad', boxes: 1, quantity: 1, costPrice: 0,
@@ -59,7 +59,14 @@ function hydrateIntakeLine(line: IntakeLine): IntakeLine {
     amount: toNumber(line.amount),
     unitsPerBox,
     boxes: intakeBoxesFromQty(quantity, unitsPerBox),
+    physicalRemaining: line.physicalRemaining,
   };
+}
+
+function remainingToSend(remaining: number | undefined, existence: number) {
+  if (remaining == null || !Number.isFinite(remaining)) return undefined;
+  if (Math.abs(remaining - existence) <= 0.009) return undefined;
+  return remaining;
 }
 
 function intakeProductNames(intake: Intake) {
@@ -149,13 +156,16 @@ export default function IntakesPage() {
     const unitCost = toNumber(product.unitPrice) || unitCostFromBox(toNumber(product.costPrice), unitsPerBox);
     const sale1 = toNumber(product.salePrice1);
     const nextBins = productBins(toNumber(product.stock), toNumber(product.dispatchQty), toNumber(product.warehouseQty));
-    setDraft(withSalePrices(recalcIntakePricing(applyIntakeBoxes({
-      ...emptyLine(), productId: product.id, sku: product.sku, productName: product.name,
-      generic: product.generic || '', brand: product.brand || '', line: product.line || '',
-      unit: product.unit || 'Unidad', boxes: 1, costPrice: toNumber(product.costPrice), unitsPerBox,
-      unitCost, salePrice1: sale1, salePrice2: sale1,
-      utilityPercent: markupPercent(sale1, unitCost) || DEFAULT_UTILITY_PERCENT,
-    }), false), sale1));
+    setDraft({
+      ...withSalePrices(recalcIntakePricing(applyIntakeBoxes({
+        ...emptyLine(), productId: product.id, sku: product.sku, productName: product.name,
+        generic: product.generic || '', brand: product.brand || '', line: product.line || '',
+        unit: product.unit || 'Unidad', boxes: 1, costPrice: toNumber(product.costPrice), unitsPerBox,
+        unitCost, salePrice1: sale1, salePrice2: sale1,
+        utilityPercent: markupPercent(sale1, unitCost) || DEFAULT_UTILITY_PERCENT,
+      }), false), sale1),
+      physicalRemaining: nextBins.existence,
+    });
     setBins({ dispatch: nextBins.dispatch, warehouse: nextBins.warehouse });
     if (!supplier && product.supplier) setSupplier(product.supplier);
     setQuery('');
@@ -215,9 +225,15 @@ export default function IntakesPage() {
   function addLine(event: FormEvent) {
     event.preventDefault();
     if ((!draft.sku && !draft.productId) || !draft.productName || draft.quantity <= 0) return;
+    const existence = existenceQty(bins.dispatch, bins.warehouse);
+    const remaining = remainingToSend(draft.physicalRemaining, existence);
+    if (remaining != null && remaining > existence + 0.009) {
+      toastWarning(LABELS.intakeRemainingTooHigh);
+      return;
+    }
     remember('brands', draft.brand);
     remember('categories', draft.line);
-    const nextLine = recalcIntakePricing(draft, false);
+    const nextLine = { ...recalcIntakePricing(draft, false), physicalRemaining: remaining };
     setLines((current) => (
       editingLineIndex == null
         ? [...current, nextLine]
@@ -260,16 +276,36 @@ export default function IntakesPage() {
   }
 
   async function save() {
+    const pendingExistence = existenceQty(bins.dispatch, bins.warehouse);
     const pendingLines = editingLineIndex == null || ((!draft.sku && !draft.productId) || !draft.productName || draft.quantity <= 0)
       ? lines
-      : lines.map((line, index) => (index === editingLineIndex ? recalcIntakePricing(draft, false) : line));
+      : lines.map((line, index) => (
+        index === editingLineIndex
+          ? { ...recalcIntakePricing(draft, false), physicalRemaining: remainingToSend(draft.physicalRemaining, pendingExistence) }
+          : line
+      ));
     if (!pendingLines.length || !supplier) {
       toastWarning('Indique proveedor y al menos una línea');
       return;
     }
+    if (draft.physicalRemaining != null && draft.physicalRemaining > pendingExistence + 0.009) {
+      toastWarning(LABELS.intakeRemainingTooHigh);
+      return;
+    }
     setSaving(true); setError('');
     try {
-      const payload = { documentNumber, purchaseOrder, billedAs, supplier, date, lines: pendingLines.map((line) => ({ ...line, expiresAt: line.expiresAt || undefined })) };
+      const payload = {
+        documentNumber,
+        purchaseOrder,
+        billedAs,
+        supplier,
+        date,
+        lines: pendingLines.map((line) => ({
+          ...line,
+          expiresAt: line.expiresAt || undefined,
+          physicalRemaining: line.physicalRemaining,
+        })),
+      };
       const saved = editingId
         ? await api<Intake>(`/api/intakes/${editingId}`, { method: 'PUT', body: JSON.stringify(payload) })
         : await api<Intake>('/api/intakes', { method: 'POST', body: JSON.stringify(payload) });
@@ -298,6 +334,20 @@ export default function IntakesPage() {
     setBins({ dispatch: 0, warehouse: 0 });
     setMessage(`Editando ingreso ${intake.id}`);
   }
+
+  const existence = existenceQty(bins.dispatch, bins.warehouse);
+  const loose = splitPack(existence, draft.unitsPerBox || 1).loose;
+  const previewLots = allocateLotRemainings(existingLots, draft.physicalRemaining ?? existence);
+  const intakePreview = draft.productId
+    ? applyIntakeWithRemaining(
+      bins.dispatch,
+      bins.warehouse,
+      draft.quantity,
+      draft.destination,
+      draft.physicalRemaining,
+      draft.unitsPerBox,
+    )
+    : null;
 
   return (
     <div className="grid gap-4">
@@ -382,6 +432,29 @@ export default function IntakesPage() {
           <Field label={LABELS.boxesToEnter}><input className={inputClass} type="number" min={0} value={draft.boxes} onChange={(e) => setDraft(withIntakeBoxes(draft, Number(e.target.value)))} /></Field>
           <Field label={LABELS.unitsPerBox}><input className={inputClass} type="number" min={1} value={draft.unitsPerBox} onChange={(e) => setDraft(withIntakeBoxes(draft, draft.boxes, Number(e.target.value)))} /></Field>
           <Field label={LABELS.unitsToEnter}><input className={inputClass} type="number" min={0} step="any" value={draft.quantity} onChange={(e) => setDraft(withIntakeQuantity(draft, Number(e.target.value)))} /></Field>
+          {draft.productId && existence > 0 ? (
+            <>
+              <Field label={LABELS.physicalRemaining}>
+                <input
+                  className={inputClass}
+                  type="number"
+                  min={0}
+                  step="any"
+                  value={draft.physicalRemaining ?? existence}
+                  onChange={(e) => setDraft({ ...draft, physicalRemaining: Number(e.target.value) })}
+                />
+                <p className="mt-1 text-xs text-slate-500">
+                  {LABELS.physicalRemainingHint}
+                  {loose > 0 ? ` ${LABELS.looseUnits}: ${formatQty(loose)}.` : ''}
+                </p>
+              </Field>
+              <div className="flex items-end">
+                <SubmitButton type="button" variant="ghost" className="px-3 py-1.5" onClick={() => setDraft({ ...draft, physicalRemaining: 0 })}>
+                  {LABELS.zeroStock}
+                </SubmitButton>
+              </div>
+            </>
+          ) : null}
           <Field label="Precio costo"><input className={inputClass} type="number" value={draft.costPrice} onChange={(e) => {
             const priced = recalcIntakePricing({ ...draft, costPrice: Number(e.target.value) });
             setDraft(withSalePrices({ ...priced, salePrice1: draft.salePrice1 }, draft.salePrice2));
@@ -394,17 +467,22 @@ export default function IntakesPage() {
           <Field label={LABELS.destination}><input className={inputClass} value={destinationLabel(draft.destination)} readOnly /></Field>
           <div className="flex items-end"><SubmitButton type="submit" variant="blue">{editingLineIndex == null ? LABELS.add : LABELS.updateLine}</SubmitButton></div>
         </form>
-        {draft.productId ? (
+        {draft.productId && intakePreview?.ok ? (
           <p className="mt-2 text-sm text-slate-600">
-            {binsPreview({ ...bins, existence: existenceQty(bins.dispatch, bins.warehouse) })}
+            {intakePreview.wroteOff > 0
+              ? `Ajuste: se sacan ${formatQty(intakePreview.wroteOff)} y quedan ${formatQty(intakePreview.remaining)}. Luego ingresan ${formatQty(draft.quantity)} → `
+              : null}
+            {binsPreview({ ...bins, existence })}
             {' → '}
-            {binsPreview(nextIntakeBins(bins.dispatch, bins.warehouse, draft.quantity, draft.destination))}
+            {binsPreview(intakePreview.bins)}
           </p>
+        ) : draft.productId && intakePreview && !intakePreview.ok ? (
+          <p className="mt-2 text-sm font-semibold text-amber-800">{LABELS.intakeRemainingTooHigh}</p>
         ) : null}
         {draft.destination === 'warehouse' ? (
           <p className="mt-1 text-sm font-semibold text-amber-800">{LABELS.priceChangeToWarehouse}</p>
         ) : null}
-        <ExistingLotsPanel lots={existingLots} newExpiresAt={draft.expiresAt} />
+        <ExistingLotsPanel lots={previewLots} newExpiresAt={draft.expiresAt} />
         <h3 className="-mx-4 mt-4 rounded-none bg-slate-50 px-4 py-2 text-sm font-semibold text-slate-600 sm:mx-0 sm:rounded-xl">Detalle de ingreso</h3>
         <TableWrap className="mt-2">
           <table className={tableClass}>
