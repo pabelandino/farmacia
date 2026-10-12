@@ -2,12 +2,14 @@ export const PERMISSION_KEYS = [
   'billing',
   'invoices',
   'products',
+  'editProducts',
   'transfers',
   'suppliers',
   'voidInvoice',
   'dashboard',
   'intakes',
   'writeOffs',
+  'expenses',
   'cash',
   'clients',
   'reports',
@@ -23,13 +25,15 @@ export const CASHIER_DEFAULTS: PermissionMap = {
   billing: true,
   invoices: true,
   products: true,
+  editProducts: false,
   transfers: true,
   suppliers: true,
   voidInvoice: false,
   dashboard: false,
   intakes: false,
   writeOffs: false,
-  cash: false,
+  expenses: false,
+  cash: true,
   clients: false,
   reports: false,
   settings: false,
@@ -55,8 +59,8 @@ export function normalizePermissions(role: string | undefined, raw: unknown): Pe
   }
   if (!('billing' in src)) next.billing = flag(src.cashInvoice) || flag(src.creditInvoice) || next.billing;
   if (!('voidInvoice' in src) && 'deleteInvoice' in src) next.voidInvoice = flag(src.deleteInvoice);
-  if (!('products' in src) && 'productSearch' in src) next.products = flag(src.productSearch);
-  if (!('cash' in src) && 'cashOpen' in src) next.cash = flag(src.cashOpen);
+  if (!('products' in src) && flag(src.productSearch)) next.products = true;
+  if (!('cash' in src) && flag(src.cashOpen)) next.cash = true;
   return next;
 }
 
@@ -79,6 +83,7 @@ export function hasAnyPermission(
 export function homePath(user: { role?: string; permissions?: Partial<PermissionMap> } | null | undefined) {
   const routes: Array<[PermissionKey, string]> = [
     ['billing', '/'],
+    ['voidInvoice', '/anular'],
     ['invoices', '/reportes/facturas'],
     ['products', '/productos'],
     ['transfers', '/traslados'],
@@ -86,6 +91,7 @@ export function homePath(user: { role?: string; permissions?: Partial<Permission
     ['dashboard', '/dashboard'],
     ['intakes', '/ingresos'],
     ['writeOffs', '/bajas'],
+    ['expenses', '/egresos'],
     ['cash', '/caja'],
     ['clients', '/clientes'],
     ['reports', '/reportes'],

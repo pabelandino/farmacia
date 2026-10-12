@@ -1,5 +1,5 @@
 import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
-import { allocateLotRemainings, unitCostFromBox } from '@farmaplus/domain';
+import { allocateLotRemainings, stockFieldsFromBins, unitCostFromBox } from '@farmaplus/domain';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CatalogNameDto, ProductQueryDto, UpsertProductDto } from './dto/product.dto';
@@ -122,13 +122,15 @@ export class ProductsService {
 
   private pricing(dto: UpsertProductDto) {
     const unitsPerBox = dto.unitsPerBox ?? 1;
+    const bins = dto.dispatchQty != null || dto.warehouseQty != null
+      ? stockFieldsFromBins(dto.dispatchQty ?? 0, dto.warehouseQty ?? 0)
+      : null;
     return {
       ...dto,
       unitsPerBox,
       soldByUnit: dto.soldByUnit ?? false,
       unitPrice: unitCostFromBox(dto.costPrice, unitsPerBox),
-      ...(dto.dispatchQty != null ? { dispatchQty: dto.dispatchQty, stock: dto.dispatchQty } : {}),
-      ...(dto.warehouseQty != null ? { warehouseQty: dto.warehouseQty } : {}),
+      ...(bins || {}),
       ...(dto.maxQty != null ? { maxQty: dto.maxQty } : {}),
     };
   }

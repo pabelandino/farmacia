@@ -11,6 +11,8 @@ export class UserPermissionsDto {
   @IsOptional() @IsBoolean() dashboard?: boolean;
   @IsOptional() @IsBoolean() intakes?: boolean;
   @IsOptional() @IsBoolean() writeOffs?: boolean;
+  @IsOptional() @IsBoolean() expenses?: boolean;
+  @IsOptional() @IsBoolean() editProducts?: boolean;
   @IsOptional() @IsBoolean() cash?: boolean;
   @IsOptional() @IsBoolean() clients?: boolean;
   @IsOptional() @IsBoolean() reports?: boolean;

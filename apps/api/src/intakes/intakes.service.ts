@@ -3,19 +3,17 @@ import {
   DEFAULT_UTILITY_PERCENT,
   applyIntakeWithRemaining,
   catalogPricesAfterIntake,
+  consumeDispatchFirst,
   intakeTotal,
+  nextIntakeBins,
   salePriceFromMarkup,
+  stockFieldsFromBins,
   unitCostFromBox,
 } from '@farmaplus/domain';
 import { Prisma } from '@prisma/client';
+import { dateOnly } from '../dates';
 import { PrismaService } from '../prisma/prisma.service';
 import { IntakeLineDto, IntakeQueryDto, UpsertIntakeDto } from './dto/intake.dto';
-
-function dateOnly(value?: string) {
-  if (value) return new Date(`${value.slice(0, 10)}T00:00:00.000Z`);
-  const today = new Date();
-  return new Date(Date.UTC(today.getFullYear(), today.getMonth(), today.getDate()));
-}
 
 function money(value: Prisma.Decimal | number | string) {
   return Number(value);
@@ -193,52 +191,47 @@ export class IntakesService {
     destination: string,
     physicalRemaining?: number,
   ) {
-    if (physicalRemaining != null) {
-      const product = await tx.product.findUnique({ where: { id: productId } });
-      if (!product) throw new NotFoundException('Producto no encontrado');
-      const result = applyIntakeWithRemaining(
-        Number(product.dispatchQty),
-        Number(product.warehouseQty),
-        qty,
-        destination === 'warehouse' ? 'warehouse' : 'dispatch',
-        physicalRemaining,
-        product.unitsPerBox,
-      );
-      if (!result.ok) {
-        throw new BadRequestException('No puede quedar más de lo que hay ahora');
-      }
-      if (result.wroteOff > 0) {
-        await tx.product.update({
-          where: { id: productId },
-          data: {
-            stock: { decrement: result.fromDispatch },
-            dispatchQty: { decrement: result.fromDispatch },
-            warehouseQty: { decrement: result.fromWarehouse },
-          },
-        });
-      }
+    const product = await tx.product.findUnique({ where: { id: productId } });
+    if (!product) throw new NotFoundException('Producto no encontrado');
+    const result = applyIntakeWithRemaining(
+      Number(product.dispatchQty),
+      Number(product.warehouseQty),
+      qty,
+      destination === 'warehouse' ? 'warehouse' : 'dispatch',
+      physicalRemaining,
+      product.unitsPerBox,
+    );
+    if (!result.ok) {
+      throw new BadRequestException('No puede quedar más de lo que hay ahora');
     }
-    return this.applyStock(tx, productId, qty, destination);
+    return tx.product.update({
+      where: { id: productId },
+      data: stockFieldsFromBins(result.bins.dispatch, result.bins.warehouse),
+    });
   }
 
-  private applyStock(
+  private async applyStock(
     tx: Prisma.TransactionClient,
     productId: number,
     qty: number,
     destination: string,
   ) {
-    if (destination === 'warehouse') {
+    const product = await tx.product.findUnique({ where: { id: productId } });
+    if (!product) throw new NotFoundException('Producto no encontrado');
+    const dispatch = Number(product.dispatchQty);
+    const warehouse = Number(product.warehouseQty);
+    const dest = destination === 'warehouse' ? 'warehouse' : 'dispatch';
+    if (qty >= 0) {
+      const next = nextIntakeBins(dispatch, warehouse, qty, dest);
       return tx.product.update({
         where: { id: productId },
-        data: { warehouseQty: { increment: qty } },
+        data: stockFieldsFromBins(next.dispatch, next.warehouse),
       });
     }
+    const split = consumeDispatchFirst(dispatch, warehouse, -qty);
     return tx.product.update({
       where: { id: productId },
-      data: {
-        stock: { increment: qty },
-        dispatchQty: { increment: qty },
-      },
+      data: stockFieldsFromBins(split.dispatchQty, split.warehouseQty),
     });
   }
 }

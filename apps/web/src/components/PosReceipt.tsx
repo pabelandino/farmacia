@@ -35,7 +35,7 @@ export function PosReceipt({
         <div>{LABELS.date}  {receipt.date}</div>
       </div>
 
-      <div className="pos-receipt-cols mt-3 grid gap-x-1 border-y border-black py-1">
+      <div className="pos-receipt-cols mt-3 grid gap-x-2 border-y border-black py-1">
         <span>{LABELS.skuProd}</span>
         <span className="text-right">{LABELS.qty}</span>
         <span className="text-right">{LABELS.price}</span>
@@ -45,8 +45,8 @@ export function PosReceipt({
       {receipt.lines.map((line) => (
         <div key={`${line.sku}-${line.name}`} className="border-b border-black py-1">
           <div>{line.name}</div>
-          <div className="pos-receipt-cols grid gap-x-1">
-            <span>{line.sku}</span>
+          <div className="pos-receipt-cols grid gap-x-2">
+            <span className="pos-receipt-sku">{line.sku}</span>
             <span className="text-right">{formatMoney(line.quantity)}</span>
             <span className="text-right">{formatMoney(line.price)}</span>
             <span className="text-right">{formatMoney(lineAmount(line.price, line.quantity))}</span>

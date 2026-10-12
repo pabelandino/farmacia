@@ -1,19 +1,24 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { allocateLotRemainings, expiryStatus, expiryWindow, inventoryLineValue, splitPack, sumInventoryValues } from '@farmaplus/domain';
+import { allocateLotRemainings, calendarDateIso, calendarDateUtc, expiryStatus, expiryWindow, inventoryLineValue, salesMinusExpenses, splitPack, sumInventoryValues } from '@farmaplus/domain';
 import { InvoiceStatus, Prisma } from '@prisma/client';
+import { summarizeCashDay } from '../cash/cash-day';
 import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
 export class ReportsService {
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
-  async sales(date = new Date().toISOString().slice(0, 10)) {
+  async sales(date = calendarDateIso()) {
     const day = new Date(`${date}T00:00:00.000Z`);
-    const invoices = await this.prisma.invoice.findMany({
-      where: { date: day },
-      include: { items: true },
-      orderBy: { number: 'asc' },
-    });
+    const [invoices, session, entries] = await Promise.all([
+      this.prisma.invoice.findMany({
+        where: { date: day },
+        include: { items: true },
+        orderBy: { number: 'asc' },
+      }),
+      this.prisma.cashSession.findUnique({ where: { date: day } }),
+      this.prisma.cashEntry.findMany({ where: { date: day }, select: { operatingExpense: true, returnExpense: true } }),
+    ]);
     const paid = invoices.filter((invoice) => invoice.status === InvoiceStatus.PAID);
     const voided = invoices.filter((invoice) => invoice.status === InvoiceStatus.VOID);
     const credit = invoices.filter((invoice) => invoice.status === InvoiceStatus.CREDIT);
@@ -22,6 +27,9 @@ export class ReportsService {
     const card = paid.reduce((sum, invoice) => sum + Number(invoice.cardAmount), 0);
     const profit = paid.reduce((sum, invoice) => sum + Number(invoice.profit), 0);
     const creditTotal = credit.reduce((sum, invoice) => sum + Number(invoice.total), 0);
+    const operatingExpense = entries.reduce((sum, row) => sum + Number(row.operatingExpense), 0);
+    const returnExpense = entries.reduce((sum, row) => sum + Number(row.returnExpense), 0);
+    const cashDay = summarizeCashDay(invoices, session, { operatingExpense, returnExpense });
     return {
       date,
       count: paid.length,
@@ -32,6 +40,19 @@ export class ReportsService {
       card: Number(card.toFixed(2)),
       profit: Number(profit.toFixed(2)),
       creditTotal: Number(creditTotal.toFixed(2)),
+      cuts: cashDay.cuts,
+      openingAmount: cashDay.openingAmount,
+      expectedCash: cashDay.expectedCash,
+      countedCash: cashDay.countedCash,
+      difference: cashDay.difference,
+      shiftExpectedCash: cashDay.shiftExpectedCash,
+      shiftCountedCash: cashDay.shiftCountedCash,
+      shiftDifference: cashDay.shiftDifference,
+      openedAt: cashDay.openedAt,
+      closedAt: cashDay.closedAt,
+      shiftClosedAt: cashDay.shiftClosedAt,
+      expenses: Number(operatingExpense.toFixed(2)),
+      salesMinusExpenses: salesMinusExpenses(total, operatingExpense),
       invoices: invoices.map((invoice) => ({
         id: invoice.id,
         number: invoice.number,
@@ -46,7 +67,7 @@ export class ReportsService {
     };
   }
 
-  async cash(date = new Date().toISOString().slice(0, 10)) {
+  async cash(date = calendarDateIso()) {
     const day = new Date(`${date}T00:00:00.000Z`);
     const rows = await this.prisma.cashEntry.findMany({
       where: { date: day },
@@ -83,11 +104,11 @@ export class ReportsService {
   }
 
   async dashboard(days = 14) {
-    const from = new Date();
-    from.setUTCHours(0, 0, 0, 0);
+    const todayKey = calendarDateIso();
+    const from = calendarDateUtc(todayKey);
     from.setUTCDate(from.getUTCDate() - (days - 1));
 
-    const expiry = expiryWindow(new Date().toISOString().slice(0, 10));
+    const expiry = expiryWindow(todayKey);
     const expiryWhere: Prisma.IntakeLineWhereInput = {
       expiresAt: {
         gte: new Date(`${expiry.from}T00:00:00.000Z`),
@@ -164,7 +185,6 @@ export class ReportsService {
     });
 
     const receivable = creditOpen.reduce((sum, row) => sum + Number(row.total) - Number(row.advanceAmount), 0);
-    const todayKey = new Date().toISOString().slice(0, 10);
     const today = byDay.get(todayKey) || emptyDay();
     const remainingByLot = await this.remainingByLineId(expiredLotRows.map((row) => row.productId));
     const openExpired = expiredLotRows
@@ -405,14 +425,34 @@ export class ReportsService {
           }
         : {}),
     };
+    const invoiceWhere: Prisma.InvoiceWhereInput = {
+      date: { gte: range.from, lte: range.to },
+      status: { not: InvoiceStatus.VOID },
+      ...(q
+        ? {
+            OR: [
+              { clientName: { contains: q, mode: 'insensitive' } },
+              { cashierName: { contains: q, mode: 'insensitive' } },
+              { items: { some: { sku: { contains: q, mode: 'insensitive' } } } },
+              { items: { some: { productName: { contains: q, mode: 'insensitive' } } } },
+              { items: { some: { brand: { contains: q, mode: 'insensitive' } } } },
+              ...(invoiceNumber != null ? [{ number: invoiceNumber }] : []),
+            ],
+          }
+        : {}),
+    };
     const page = this.pageOpts(query);
-    const [lineCount, sums, invoiceGroups, rows] = await Promise.all([
+    const [lineCount, sums, invoiceCount, expenseSum, rows] = await Promise.all([
       this.prisma.invoiceItem.count({ where }),
       this.prisma.invoiceItem.aggregate({
         where,
         _sum: { quantity: true, amount: true, profit: true },
       }),
-      this.prisma.invoiceItem.groupBy({ by: ['invoiceId'], where }),
+      this.prisma.invoice.count({ where: invoiceWhere }),
+      this.prisma.cashEntry.aggregate({
+        where: { date: { gte: range.from, lte: range.to }, operatingExpense: { gt: 0 } },
+        _sum: { operatingExpense: true },
+      }),
       this.prisma.invoiceItem.findMany({
         where,
         include: { invoice: true },
@@ -422,14 +462,17 @@ export class ReportsService {
     ]);
     const totalSale = Number(sums._sum.amount || 0);
     const totalProfit = Number(sums._sum.profit || 0);
+    const expenses = Number(expenseSum._sum.operatingExpense || 0);
     return {
       from: range.fromKey,
       to: range.toKey,
       lineCount,
-      invoiceCount: invoiceGroups.length,
+      invoiceCount,
       totalQty: this.money(sums._sum.quantity),
       totalSale: this.money(totalSale),
       totalProfit: this.money(totalProfit),
+      expenses: this.money(expenses),
+      salesMinusExpenses: salesMinusExpenses(totalSale, expenses),
       marginPct: totalSale > 0 ? this.money((totalProfit / totalSale) * 100) : 0,
       page: query.all ? 1 : page.page,
       pageSize: query.all ? lineCount : page.pageSize,
@@ -475,7 +518,7 @@ export class ReportsService {
     };
     const soldWhere: Prisma.InvoiceWhereInput = { ...where, status: { not: InvoiceStatus.VOID } };
     const page = this.pageOpts(query);
-    const [count, paidCount, voidedCount, creditCount, sold, cashCard, creditSum, rows] = await Promise.all([
+    const [count, paidCount, voidedCount, creditCount, sold, cashCard, creditSum, expenseSum, rows] = await Promise.all([
       this.prisma.invoice.count({ where }),
       this.prisma.invoice.count({ where: { ...where, status: InvoiceStatus.PAID } }),
       this.prisma.invoice.count({ where: { ...where, status: InvoiceStatus.VOID } }),
@@ -492,6 +535,10 @@ export class ReportsService {
         where: { ...where, status: InvoiceStatus.CREDIT },
         _sum: { total: true },
       }),
+      this.prisma.cashEntry.aggregate({
+        where: { date: { gte: range.from, lte: range.to }, operatingExpense: { gt: 0 } },
+        _sum: { operatingExpense: true },
+      }),
       this.prisma.invoice.findMany({
         where,
         include: {
@@ -505,6 +552,7 @@ export class ReportsService {
       }),
     ]);
     const totalSale = Number(sold._sum.total || 0);
+    const expenses = Number(expenseSum._sum.operatingExpense || 0);
     const soldCount = paidCount + creditCount;
     return {
       from: range.fromKey,
@@ -514,6 +562,8 @@ export class ReportsService {
       voidedCount,
       creditCount,
       totalSale: this.money(totalSale),
+      expenses: this.money(expenses),
+      salesMinusExpenses: salesMinusExpenses(totalSale, expenses),
       totalProfit: this.money(sold._sum.profit),
       cashTotal: this.money(cashCard._sum.cashAmount),
       cardTotal: this.money(cashCard._sum.cardAmount),
@@ -544,7 +594,7 @@ export class ReportsService {
   }
 
   async expiredProducts(query: { from?: string; to?: string; q?: string; page?: number; pageSize?: number; all?: boolean } = {}) {
-    const today = new Date().toISOString().slice(0, 10);
+    const today = calendarDateIso();
     const defaults = expiryWindow(today);
     const range = this.dayRange(query.from || defaults.from, query.to || defaults.to);
     const q = query.q?.trim();
@@ -671,7 +721,7 @@ export class ReportsService {
   }
 
   private dayRange(from?: string, to?: string) {
-    const fromKey = from || new Date().toISOString().slice(0, 10);
+    const fromKey = from || calendarDateIso();
     const toKey = to || fromKey;
     const start = fromKey <= toKey ? fromKey : toKey;
     const end = fromKey <= toKey ? toKey : fromKey;

@@ -187,6 +187,146 @@ export function recalcIntakePricing<T extends IntakePricingFields>(line: T, from
 /** Alert window for expired / near-expiry lots (intake Vencimiento). */
 export const EXPIRY_ALERT_MONTHS = 3;
 
+/** Pharmacy calendar. Docker/Node default to UTC; 18:00 here is already the next UTC day. */
+export const BUSINESS_TIME_ZONE = 'America/Managua';
+
+export function calendarDateIso(at = new Date(), timeZone = BUSINESS_TIME_ZONE): string {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(at);
+  const get = (type: Intl.DateTimeFormatPartTypes) => parts.find((part) => part.type === type)?.value || '00';
+  return `${get('year')}-${get('month')}-${get('day')}`;
+}
+
+export function calendarHour(at = new Date(), timeZone = BUSINESS_TIME_ZONE): number {
+  const hour = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    hour: 'numeric',
+    hourCycle: 'h23',
+  }).formatToParts(at).find((part) => part.type === 'hour')?.value;
+  return Number(hour || 0);
+}
+
+export function calendarTimeHm(at = new Date(), timeZone = BUSINESS_TIME_ZONE): string {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone,
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(at);
+  const get = (type: Intl.DateTimeFormatPartTypes) => parts.find((part) => part.type === type)?.value || '00';
+  return `${get('hour')}:${get('minute')}`;
+}
+
+export const CASH_CUT_KEYS = ['cut10', 'cut13', 'cut16', 'close'] as const;
+export type CashCutKey = (typeof CASH_CUT_KEYS)[number];
+
+/** Automatic drawer cuts in America/Managua. Close covers 16:00 through closing (~19:00–19:30). */
+export const CASH_CUT_DEFS: ReadonlyArray<{ key: CashCutKey; endHour: number }> = [
+  { key: 'cut10', endHour: 10 },
+  { key: 'cut13', endHour: 13 },
+  { key: 'cut16', endHour: 16 },
+  { key: 'close', endHour: 24 },
+];
+
+export function cashCutKeyByHour(hour: number): CashCutKey {
+  if (hour < 10) return 'cut10';
+  if (hour < 13) return 'cut13';
+  if (hour < 16) return 'cut16';
+  return 'close';
+}
+
+/** After the 4:00 cashier change, later sales belong to the final cut. */
+export function cashCutKeyForInvoice(hour: number, createdAtMs: number, shiftClosedAtMs?: number | null): CashCutKey {
+  if (shiftClosedAtMs != null && createdAtMs <= shiftClosedAtMs) {
+    if (hour < 10) return 'cut10';
+    if (hour < 13) return 'cut13';
+    return 'cut16';
+  }
+  if (shiftClosedAtMs != null && createdAtMs > shiftClosedAtMs) return 'close';
+  return cashCutKeyByHour(hour);
+}
+
+/** Sale amount that should stay in the drawer (total minus card). */
+export function cashSaleAmount(total: number, cardAmount: number): number {
+  return roundMoney(Math.max(0, Number(total || 0) - Number(cardAmount || 0)));
+}
+
+export function expectedDrawerCash(
+  openingAmount: number,
+  cashSales: number,
+  operatingExpense = 0,
+  returns = 0,
+): number {
+  return roundMoney(Number(openingAmount || 0) + Number(cashSales || 0) - Number(operatingExpense || 0) - Number(returns || 0));
+}
+
+export function drawerDifference(countedCash: number, expectedCash: number): number {
+  return roundMoney(Number(countedCash || 0) - Number(expectedCash || 0));
+}
+
+/** Paid invoice total after subtracting cash expenses. */
+export function salesMinusExpenses(sales: number, expenses: number): number {
+  return roundMoney(Number(sales || 0) - Number(expenses || 0));
+}
+
+export type CashCutTotals = {
+  key: CashCutKey;
+  invoiceCount: number;
+  voided: number;
+  total: number;
+  cash: number;
+  card: number;
+  profit: number;
+};
+
+export function emptyCashCuts(): Record<CashCutKey, CashCutTotals> {
+  return {
+    cut10: { key: 'cut10', invoiceCount: 0, voided: 0, total: 0, cash: 0, card: 0, profit: 0 },
+    cut13: { key: 'cut13', invoiceCount: 0, voided: 0, total: 0, cash: 0, card: 0, profit: 0 },
+    cut16: { key: 'cut16', invoiceCount: 0, voided: 0, total: 0, cash: 0, card: 0, profit: 0 },
+    close: { key: 'close', invoiceCount: 0, voided: 0, total: 0, cash: 0, card: 0, profit: 0 },
+  };
+}
+
+export function addInvoiceToCashCutByKey(
+  cuts: Record<CashCutKey, CashCutTotals>,
+  key: CashCutKey,
+  invoice: { status: string; total: number; cardAmount: number; profit: number },
+) {
+  const cut = cuts[key];
+  if (invoice.status === 'VOID') {
+    cut.voided += 1;
+    return cut;
+  }
+  if (invoice.status !== 'PAID') return cut;
+  cut.invoiceCount += 1;
+  cut.total = roundMoney(cut.total + Number(invoice.total || 0));
+  cut.card = roundMoney(cut.card + Number(invoice.cardAmount || 0));
+  cut.cash = roundMoney(cut.cash + cashSaleAmount(invoice.total, invoice.cardAmount));
+  cut.profit = roundMoney(cut.profit + Number(invoice.profit || 0));
+  return cut;
+}
+
+export function addInvoiceToCashCut(
+  cuts: Record<CashCutKey, CashCutTotals>,
+  hour: number,
+  invoice: { status: string; total: number; cardAmount: number; profit: number },
+) {
+  return addInvoiceToCashCutByKey(cuts, cashCutKeyByHour(hour), invoice);
+}
+
+/** Midnight UTC of a YYYY-MM-DD (or of "today" in the pharmacy zone) for Prisma @db.Date. */
+export function calendarDateUtc(value?: string | Date, timeZone = BUSINESS_TIME_ZONE): Date {
+  const iso = typeof value === 'string' && /^\d{4}-\d{2}-\d{2}/.test(value)
+    ? value.slice(0, 10)
+    : calendarDateIso(value instanceof Date ? value : new Date(), timeZone);
+  return new Date(`${iso}T00:00:00.000Z`);
+}
+
 /** Shift an ISO date (YYYY-MM-DD) by whole calendar months in UTC. */
 export function addCalendarMonths(isoDate: string, months: number): string {
   const [year, month, day] = isoDate.split('-').map(Number);
@@ -298,6 +438,37 @@ export function productBins(stock: number, dispatchQty: number, warehouseQty: nu
   return { dispatch, warehouse, existence: existenceQty(dispatch, warehouse) };
 }
 
+/**
+ * Empty counter restocks from warehouse. If dispatch is 0 and bodega has
+ * units, those units become dispatch so the shelf is not left empty.
+ */
+export function replenishDispatchFromWarehouse(dispatchQty: number, warehouseQty: number) {
+  const dispatch = Math.max(0, Number(dispatchQty) || 0);
+  const warehouse = Math.max(0, Number(warehouseQty) || 0);
+  if (dispatch > 0.009 || warehouse <= 0.009) {
+    return {
+      dispatchQty: Number(dispatch.toFixed(2)),
+      warehouseQty: Number(warehouse.toFixed(2)),
+      moved: 0,
+    };
+  }
+  return {
+    dispatchQty: Number(warehouse.toFixed(2)),
+    warehouseQty: 0,
+    moved: Number(warehouse.toFixed(2)),
+  };
+}
+
+/** Persist shape: stock tracks dispatch after an optional warehouse pull. */
+export function stockFieldsFromBins(dispatchQty: number, warehouseQty: number) {
+  const bins = replenishDispatchFromWarehouse(dispatchQty, warehouseQty);
+  return {
+    stock: bins.dispatchQty,
+    dispatchQty: bins.dispatchQty,
+    warehouseQty: bins.warehouseQty,
+  };
+}
+
 /** After an intake: existence is always next dispatch + next warehouse. */
 export function nextIntakeBins(
   dispatchQty: number,
@@ -310,7 +481,12 @@ export function nextIntakeBins(
   const warehouse = Number(warehouseQty) || 0;
   const nextDispatch = destination === 'warehouse' ? dispatch : dispatch + qty;
   const nextWarehouse = destination === 'warehouse' ? warehouse + qty : warehouse;
-  return { dispatch: nextDispatch, warehouse: nextWarehouse, existence: existenceQty(nextDispatch, nextWarehouse) };
+  const bins = replenishDispatchFromWarehouse(nextDispatch, nextWarehouse);
+  return {
+    dispatch: bins.dispatchQty,
+    warehouse: bins.warehouseQty,
+    existence: existenceQty(bins.dispatchQty, bins.warehouseQty),
+  };
 }
 
 /** Sales consume dispatch first, then warehouse. */
@@ -320,11 +496,16 @@ export function consumeDispatchFirst(dispatchQty: number, warehouseQty: number, 
   const warehouse = Math.max(0, Number(warehouseQty) || 0);
   const fromDispatch = Math.min(dispatch, qty);
   const fromWarehouse = Math.min(warehouse, qty - fromDispatch);
+  const leftover = replenishDispatchFromWarehouse(
+    dispatch - fromDispatch,
+    warehouse - fromWarehouse,
+  );
   return {
     fromDispatch,
     fromWarehouse,
-    dispatchQty: Number((dispatch - fromDispatch).toFixed(2)),
-    warehouseQty: Number((warehouse - fromWarehouse).toFixed(2)),
+    dispatchQty: leftover.dispatchQty,
+    warehouseQty: leftover.warehouseQty,
+    movedToDispatch: leftover.moved,
   };
 }
 

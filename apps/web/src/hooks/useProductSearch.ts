@@ -39,7 +39,7 @@ export function useProductSearch(query: string, options?: { take?: number; skipE
         const split = consumeDispatchFirst(toNumber(product.dispatchQty), toNumber(product.warehouseQty), soldQty);
         return {
           ...product,
-          stock: toNumber(product.stock) - split.fromDispatch,
+          stock: split.dispatchQty,
           dispatchQty: split.dispatchQty,
           warehouseQty: split.warehouseQty,
         };

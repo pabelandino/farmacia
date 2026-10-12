@@ -4,6 +4,7 @@ import { LABELS, labeledStats, statusLabel } from '../constants/labels';
 import { StatusBadge, invoiceStatusTone } from './StatusBadge';
 import { PAGE_SIZE } from '../constants/pagination';
 import { INVOICE_REPORT_COLUMNS } from '../constants/tables';
+import { useAbortableQuery } from '../hooks/useAbortableQuery';
 import { useDebouncedValue } from '../hooks/useDebouncedValue';
 import { paymentModeLabel } from '../types/receipt';
 import { InvoiceReportItem, InvoiceReportRow, InvoicesListReport } from '../types/reports';
@@ -27,22 +28,18 @@ export function InvoicesReportPanel() {
   const [to, setTo] = useState(today);
   const [query, setQuery] = useState('');
   const [page, setPage] = useState(1);
-  const [data, setData] = useState<InvoicesListReport | null>(null);
   const [companyName, setCompanyName] = useState<string>(LABELS.appName);
   const [exporting, setExporting] = useState(false);
   const [reloadAt, setReloadAt] = useState(0);
   const debouncedQuery = useDebouncedValue(query);
+  const q = debouncedQuery.trim() ? `&q=${encodeURIComponent(debouncedQuery.trim())}` : '';
+  const { data, loading, error } = useAbortableQuery<InvoicesListReport>(
+    `/api/reports/invoices-list?from=${from}&to=${to}&page=${page}&pageSize=${PAGE_SIZE}${q}&reload=${reloadAt}`,
+  );
 
   useEffect(() => {
     setPage(1);
   }, [from, to, debouncedQuery]);
-
-  useEffect(() => {
-    const q = debouncedQuery.trim() ? `&q=${encodeURIComponent(debouncedQuery.trim())}` : '';
-    void api<InvoicesListReport>(
-      `/api/reports/invoices-list?from=${from}&to=${to}&page=${page}&pageSize=${PAGE_SIZE}${q}`,
-    ).then(setData);
-  }, [from, to, page, debouncedQuery, reloadAt]);
 
   useEffect(() => {
     api<Settings>('/api/settings').then((settings) => {
@@ -88,7 +85,9 @@ export function InvoicesReportPanel() {
           ['paidCount', formatCount(data?.paidCount ?? 0)],
           ['voidedCount', formatCount(data?.voidedCount ?? 0)],
           ['credit', formatCount(data?.creditCount ?? 0)],
-          ['totalSale', data ? formatMoney(data.totalSale) : '0.00'],
+          ['totalSale', data ? formatMoney(data.totalSale) : '0.00', 'salesWithoutExpensesHint'],
+          ['expensesToday', formatMoney(data?.expenses ?? 0)],
+          ['salesMinusExpenses', data ? formatMoney(data.salesMinusExpenses ?? data.totalSale) : '0.00', 'salesMinusExpensesHint'],
           ['totalUtility', data ? formatMoney(data.totalProfit) : '0.00'],
           ['avgTicket', data ? formatMoney(data.avgTicket) : '0.00'],
           ['cash', data ? formatMoney(data.cashTotal) : '0.00'],
@@ -105,6 +104,8 @@ export function InvoicesReportPanel() {
             {LABELS.exportExcel}
           </SubmitButton>
         </div>
+        {loading ? <p className="mt-2 text-sm text-slate-500">{LABELS.loadingReport}</p> : null}
+        {error ? <p className="mt-2 text-sm text-rose-600">{error}</p> : null}
         <TableWrap className="mt-4">
           <table className={tableClass}>
             <TableHead columns={INVOICE_REPORT_COLUMNS} />

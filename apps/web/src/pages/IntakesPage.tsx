@@ -69,6 +69,17 @@ function remainingToSend(remaining: number | undefined, existence: number) {
   return remaining;
 }
 
+function isDraftLineReady(line: IntakeLine) {
+  return Boolean((line.sku || line.productId) && line.productName && line.quantity > 0);
+}
+
+function lineFromDraft(line: IntakeLine, existence: number) {
+  if (!isDraftLineReady(line)) return null;
+  const remaining = remainingToSend(line.physicalRemaining, existence);
+  if (remaining != null && remaining > existence + 0.009) return { ok: false as const, error: 'remainingTooHigh' as const };
+  return { ok: true as const, line: { ...recalcIntakePricing(line, false), physicalRemaining: remaining } };
+}
+
 function intakeProductNames(intake: Intake) {
   const names: string[] = [];
   for (const line of intake.lines || []) {
@@ -224,16 +235,15 @@ export default function IntakesPage() {
 
   function addLine(event: FormEvent) {
     event.preventDefault();
-    if ((!draft.sku && !draft.productId) || !draft.productName || draft.quantity <= 0) return;
-    const existence = existenceQty(bins.dispatch, bins.warehouse);
-    const remaining = remainingToSend(draft.physicalRemaining, existence);
-    if (remaining != null && remaining > existence + 0.009) {
+    const prepared = lineFromDraft(draft, existenceQty(bins.dispatch, bins.warehouse));
+    if (!prepared) return;
+    if (!prepared.ok) {
       toastWarning(LABELS.intakeRemainingTooHigh);
       return;
     }
     remember('brands', draft.brand);
     remember('categories', draft.line);
-    const nextLine = { ...recalcIntakePricing(draft, false), physicalRemaining: remaining };
+    const nextLine = prepared.line;
     setLines((current) => (
       editingLineIndex == null
         ? [...current, nextLine]
@@ -276,20 +286,18 @@ export default function IntakesPage() {
   }
 
   async function save() {
-    const pendingExistence = existenceQty(bins.dispatch, bins.warehouse);
-    const pendingLines = editingLineIndex == null || ((!draft.sku && !draft.productId) || !draft.productName || draft.quantity <= 0)
-      ? lines
-      : lines.map((line, index) => (
-        index === editingLineIndex
-          ? { ...recalcIntakePricing(draft, false), physicalRemaining: remainingToSend(draft.physicalRemaining, pendingExistence) }
-          : line
-      ));
-    if (!pendingLines.length || !supplier) {
-      toastWarning('Indique proveedor y al menos una línea');
+    const prepared = lineFromDraft(draft, existenceQty(bins.dispatch, bins.warehouse));
+    if (prepared && !prepared.ok) {
+      toastWarning(LABELS.intakeRemainingTooHigh);
       return;
     }
-    if (draft.physicalRemaining != null && draft.physicalRemaining > pendingExistence + 0.009) {
-      toastWarning(LABELS.intakeRemainingTooHigh);
+    const pendingLines = prepared?.ok
+      ? editingLineIndex == null
+        ? [...lines, prepared.line]
+        : lines.map((line, index) => (index === editingLineIndex ? prepared.line : line))
+      : lines;
+    if (!pendingLines.length || !supplier.trim()) {
+      toastWarning(LABELS.intakeNeedSupplierAndLine);
       return;
     }
     setSaving(true); setError('');
@@ -393,6 +401,7 @@ export default function IntakesPage() {
                     <tr key={product.id} className="cursor-pointer hover:bg-slate-50" onClick={() => pickProduct(product)}>
                       <td className={tdClass}>{product.sku}</td>
                       <td className={tdClass}>{product.name}</td>
+                      <td className={tdClass}>{product.brand || '—'}</td>
                       <td className={tdClass}>{bins.existence}</td>
                       <td className={tdClass}>{bins.dispatch}</td>
                       <td className={tdClass}>{bins.warehouse}</td>

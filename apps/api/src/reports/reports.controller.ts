@@ -82,7 +82,7 @@ export class ReportsController {
   }
 
   @Get('invoices-list')
-  @RequirePermission('invoices', 'reports')
+  @RequirePermission('reports')
   invoicesList(
     @Query('from') from?: string,
     @Query('to') to?: string,

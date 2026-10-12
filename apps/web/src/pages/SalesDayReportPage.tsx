@@ -13,23 +13,28 @@ import { VoidInvoiceButton } from '../components/VoidInvoiceButton';
 import { tableClass, tdClass } from '../components/formClasses';
 import { LABELS, labeledStats, statusLabel } from '../constants/labels';
 import { LOW_STOCK_COLUMNS, SALES_DAY_COLUMNS } from '../constants/tables';
+import { useAbortableQuery } from '../hooks/useAbortableQuery';
 import { usePagedRows } from '../hooks/usePagedRows';
 import { paymentModeLabel } from '../types/receipt';
-import { SalesReport, StockReport } from '../types/reports';
+import { CashCutTotals, SalesReport, StockReport } from '../types/reports';
 import { todayIso } from '../utils/dates';
 import { formatCount, formatMoney, toNumber } from '../utils/numbers';
+
+function cutTotal(cuts: CashCutTotals[] | undefined, key: CashCutTotals['key']) {
+  return cuts?.find((cut) => cut.key === key)?.total ?? 0;
+}
 
 export default function SalesDayReportPage() {
   const today = todayIso();
   const [date, setDate] = useState(today);
-  const [sales, setSales] = useState<SalesReport | null>(null);
+  const [reloadAt, setReloadAt] = useState(0);
+  const { data: sales } = useAbortableQuery<SalesReport>(`/api/reports/sales?date=${date}&reload=${reloadAt}`);
   const [stock, setStock] = useState<StockReport | null>(null);
 
-  function loadSales(day = date) {
-    api<SalesReport>(`/api/reports/sales?date=${day}`).then(setSales);
+  function loadSales() {
+    setReloadAt(Date.now());
   }
 
-  useEffect(() => { loadSales(date); }, [date]);
   useEffect(() => { api<StockReport>('/api/reports/stock').then(setStock); }, []);
 
   const invoices = usePagedRows(sales?.invoices || [], date);
@@ -41,9 +46,20 @@ export default function SalesDayReportPage() {
       <StatCards
         items={labeledStats([
           ['invoicesToday', formatCount(sales?.count ?? 0)],
-          ['totalNio', sales ? formatMoney(sales.total) : '0.00'],
+          ['totalNio', sales ? formatMoney(sales.total) : '0.00', 'salesWithoutExpensesHint'],
+          ['expensesToday', formatMoney(sales?.expenses ?? 0)],
+          ['salesMinusExpenses', sales ? formatMoney(sales.salesMinusExpenses ?? sales.total) : '0.00', 'salesMinusExpensesHint'],
+          ['expectedCash', formatMoney(sales?.expectedCash ?? 0), 'cashPlusSalesMinusExpensesHint'],
           ['cashAndCard', sales ? `${formatMoney(sales.cash)} / ${formatMoney(sales.card)}` : '0.00'],
           ['creditToday', sales ? `${formatCount(sales.creditCount)} / ${formatMoney(sales.creditTotal)}` : '0'],
+          ['openingAmount', formatMoney(sales?.openingAmount ?? 0)],
+          ['cashCut10', formatMoney(cutTotal(sales?.cuts, 'cut10')), 'cashCutHint10'],
+          ['cashCut13', formatMoney(cutTotal(sales?.cuts, 'cut13')), 'cashCutHint13'],
+          ['cashCut16', formatMoney(cutTotal(sales?.cuts, 'cut16')), 'cashCutHint16'],
+          ['shiftCountedCash', sales?.shiftCountedCash == null ? '—' : formatMoney(sales.shiftCountedCash)],
+          ['shiftDifference', sales?.shiftDifference == null ? '—' : formatMoney(sales.shiftDifference)],
+          ['cashCutClose', formatMoney(cutTotal(sales?.cuts, 'close')), 'cashCutHintClose'],
+          ['cashDifference', sales?.difference == null ? '—' : formatMoney(sales.difference)],
           ['lowStock', formatCount(stock?.lowStockCount ?? 0)],
         ])}
       />

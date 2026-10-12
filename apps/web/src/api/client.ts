@@ -18,7 +18,10 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
   if (!isForm && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
   const token = getToken();
   if (token) headers.set('Authorization', `Bearer ${token}`);
-  const response = await fetch(path, { ...options, headers });
+  let response = await fetch(path, { cache: 'no-store', ...options, headers });
+  if (response.status === 304) {
+    response = await fetch(path, { cache: 'reload', ...options, headers });
+  }
   if (response.status === 401) {
     clearSession();
     if (!path.includes('/auth/login')) window.location.href = '/login';
@@ -79,6 +82,28 @@ export async function saveAuthedFile(
 ) {
   const { blob, name } = await fetchAuthedBlob(path);
   const fileName = name || fallbackName;
+  if (blob.size < 100) throw new Error('El respaldo quedó vacío');
+  if (handle) {
+    const writable = await handle.createWritable();
+    await writable.write(blob);
+    await writable.close();
+    return fileName;
+  }
+  triggerDownload(blob, fileName);
+  return fileName;
+}
+
+/** Dump first, then ask where to save, so a failed backup never leaves an empty file. */
+export async function exportAuthedFile(path: string, fallbackName: string, description: string) {
+  const { blob, name } = await fetchAuthedBlob(path);
+  const fileName = name || fallbackName;
+  if (blob.size < 100) throw new Error('El respaldo quedó vacío');
+  let handle: FileSystemFileHandle | null = null;
+  try {
+    handle = await pickSaveLocation(fileName, description);
+  } catch {
+    return null;
+  }
   if (handle) {
     const writable = await handle.createWritable();
     await writable.write(blob);

@@ -33,6 +33,8 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-farmacia}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-farmacia}
       POSTGRES_DB: ${POSTGRES_DB:-farmaplus}
+      TZ: America/Managua
+      PGTZ: America/Managua
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:

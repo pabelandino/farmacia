@@ -1,3 +1,13 @@
+export type CashCutTotals = {
+  key: 'cut10' | 'cut13' | 'cut16' | 'close';
+  invoiceCount: number;
+  voided: number;
+  total: number;
+  cash: number;
+  card: number;
+  profit: number;
+};
+
 export type SalesReport = {
   date: string;
   count: number;
@@ -8,6 +18,19 @@ export type SalesReport = {
   cash: number;
   card: number;
   profit: number;
+  cuts?: CashCutTotals[];
+  openingAmount?: number;
+  expectedCash?: number;
+  countedCash?: number | null;
+  difference?: number | null;
+  shiftExpectedCash?: number;
+  shiftCountedCash?: number | null;
+  shiftDifference?: number | null;
+  openedAt?: string | null;
+  closedAt?: string | null;
+  shiftClosedAt?: string | null;
+  expenses?: number;
+  salesMinusExpenses?: number;
   invoices: Array<{
     id: number;
     number: number;
@@ -44,6 +67,7 @@ export type CashReport = {
     returnExpense: string | number;
     card: string | number;
     cardAuth: string | null;
+    notes?: string | null;
   }>;
 };
 
@@ -195,6 +219,8 @@ export type SalesLinesReport = {
   totalQty: number;
   totalSale: number;
   totalProfit: number;
+  expenses?: number;
+  salesMinusExpenses?: number;
   marginPct: number;
   page: number;
   pageSize: number;
@@ -232,6 +258,8 @@ export type InvoicesListReport = {
   creditCount: number;
   totalSale: number;
   totalProfit: number;
+  expenses?: number;
+  salesMinusExpenses?: number;
   cashTotal: number;
   cardTotal: number;
   creditTotal: number;

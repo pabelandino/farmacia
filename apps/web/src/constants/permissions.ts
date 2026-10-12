@@ -6,12 +6,14 @@ export const PERMISSION_FIELDS: Array<{ key: PermissionKey; label: keyof typeof 
   { key: 'billing', label: 'permissionBilling' },
   { key: 'invoices', label: 'permissionInvoices' },
   { key: 'products', label: 'permissionProducts' },
+  { key: 'editProducts', label: 'permissionEditProducts' },
   { key: 'transfers', label: 'permissionTransfers' },
   { key: 'suppliers', label: 'permissionSuppliers' },
   { key: 'voidInvoice', label: 'permissionVoidInvoice' },
   { key: 'dashboard', label: 'permissionDashboard' },
   { key: 'intakes', label: 'permissionIntakes' },
   { key: 'writeOffs', label: 'permissionWriteOffs' },
+  { key: 'expenses', label: 'permissionExpenses' },
   { key: 'cash', label: 'permissionCash' },
   { key: 'clients', label: 'permissionClients' },
   { key: 'reports', label: 'permissionReports' },
@@ -20,9 +22,5 @@ export const PERMISSION_FIELDS: Array<{ key: PermissionKey; label: keyof typeof 
 ];
 
 export function visibleNavItems(items: AppNavItem[], has: (key: PermissionKey) => boolean) {
-  return items.filter((item) => {
-    if (!has(item.permission)) return false;
-    if (item.permission === 'invoices' && has('reports')) return false;
-    return true;
-  });
+  return items.filter((item) => has(item.permission));
 }

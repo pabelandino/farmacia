@@ -3,6 +3,7 @@ import { api } from '../api/client';
 import { LABELS, labeledStats } from '../constants/labels';
 import { PAGE_SIZE } from '../constants/pagination';
 import { SALES_LINES_COLUMNS } from '../constants/tables';
+import { useAbortableQuery } from '../hooks/useAbortableQuery';
 import { useDebouncedValue } from '../hooks/useDebouncedValue';
 import { paymentModeLabel } from '../types/receipt';
 import { SalesLinesReport } from '../types/reports';
@@ -25,21 +26,17 @@ export function SalesLinesReportPanel() {
   const [to, setTo] = useState(today);
   const [query, setQuery] = useState('');
   const [page, setPage] = useState(1);
-  const [data, setData] = useState<SalesLinesReport | null>(null);
   const [companyName, setCompanyName] = useState<string>(LABELS.appName);
   const [exporting, setExporting] = useState(false);
   const debouncedQuery = useDebouncedValue(query);
+  const q = debouncedQuery.trim() ? `&q=${encodeURIComponent(debouncedQuery.trim())}` : '';
+  const { data, loading, error } = useAbortableQuery<SalesLinesReport>(
+    `/api/reports/sales-lines?from=${from}&to=${to}&page=${page}&pageSize=${PAGE_SIZE}${q}`,
+  );
 
   useEffect(() => {
     setPage(1);
   }, [from, to, debouncedQuery]);
-
-  useEffect(() => {
-    const q = debouncedQuery.trim() ? `&q=${encodeURIComponent(debouncedQuery.trim())}` : '';
-    void api<SalesLinesReport>(
-      `/api/reports/sales-lines?from=${from}&to=${to}&page=${page}&pageSize=${PAGE_SIZE}${q}`,
-    ).then(setData);
-  }, [from, to, page, debouncedQuery]);
 
   useEffect(() => {
     api<Settings>('/api/settings').then((settings) => {
@@ -91,7 +88,9 @@ export function SalesLinesReportPanel() {
           ['lineCount', formatCount(data?.lineCount ?? 0)],
           ['invoiceCount', formatCount(data?.invoiceCount ?? 0)],
           ['totalQty', formatQty(data?.totalQty ?? 0)],
-          ['totalSale', data ? formatMoney(data.totalSale) : '0.00'],
+          ['totalSale', data ? formatMoney(data.totalSale) : '0.00', 'salesWithoutExpensesHint'],
+          ['expensesToday', formatMoney(data?.expenses ?? 0)],
+          ['salesMinusExpenses', data ? formatMoney(data.salesMinusExpenses ?? data.totalSale) : '0.00', 'salesMinusExpensesHint'],
           ['totalUtility', data ? formatMoney(data.totalProfit) : '0.00'],
           ['marginPct', data ? `${formatMoney(data.marginPct)}%` : '0.00%'],
         ])}
@@ -107,6 +106,8 @@ export function SalesLinesReportPanel() {
           </SubmitButton>
         </div>
         <p className="mt-2 text-xs text-slate-500">{LABELS.salesReportRangeHint}</p>
+        {loading ? <p className="mt-2 text-sm text-slate-500">{LABELS.loadingReport}</p> : null}
+        {error ? <p className="mt-2 text-sm text-rose-600">{error}</p> : null}
         <TableWrap className="mt-4">
           <table className={tableClass}>
             <TableHead columns={SALES_LINES_COLUMNS} />
