@@ -11,7 +11,7 @@ export type AppNavItem = {
 
 export const APP_LINKS: AppNavItem[] = [
   { to: '/', label: LABELS.billing, permission: 'billing', end: true, match: ['/', '/credito'] },
-  { to: '/reportes/facturas', label: LABELS.invoicesNav, permission: 'invoices' },
+  { to: '/anular', label: LABELS.voidInvoicesNav, permission: 'voidInvoice' },
   { to: '/productos', label: LABELS.products, permission: 'products' },
   { to: '/traslados', label: LABELS.transfers, permission: 'transfers' },
   { to: '/proveedores', label: LABELS.suppliers, permission: 'suppliers' },
@@ -19,6 +19,7 @@ export const APP_LINKS: AppNavItem[] = [
   { to: '/ingresos', label: LABELS.intakes, permission: 'intakes' },
   { to: '/bajas', label: LABELS.writeOffs, permission: 'writeOffs' },
   { to: '/caja', label: LABELS.cashDrawer, permission: 'cash' },
+  { to: '/egresos', label: LABELS.expenses, permission: 'expenses' },
   { to: '/clientes', label: LABELS.clients, permission: 'clients' },
   { to: '/reportes', label: LABELS.reports, permission: 'reports' },
   { to: '/usuarios', label: LABELS.users, permission: 'users' },

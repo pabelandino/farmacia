@@ -18,6 +18,7 @@ export type IntakeLine = {
   expiresAt: string;
   destination: 'dispatch' | 'warehouse';
   amount: number;
+  physicalRemaining?: number;
 };
 
 export type ProductLot = {

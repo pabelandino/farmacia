@@ -26,7 +26,11 @@ import {
   expiryStatus,
   allocateLotRemainings,
   consumeDispatchFirst,
+  replenishDispatchFromWarehouse,
+  stockFieldsFromBins,
   writeOffFullBoxes,
+  writeOffToRemaining,
+  applyIntakeWithRemaining,
   voidRestoreSplit,
   existenceQty,
   intakeDestination,
@@ -42,6 +46,17 @@ import {
   splitSaleByPrice,
   isOutOfStock,
   EXPIRY_ALERT_MONTHS,
+  calendarDateIso,
+  calendarDateUtc,
+  calendarHour,
+  cashCutKeyByHour,
+  cashCutKeyForInvoice,
+  cashSaleAmount,
+  expectedDrawerCash,
+  drawerDifference,
+  salesMinusExpenses,
+  emptyCashCuts,
+  addInvoiceToCashCut,
 } from './index';
 
 describe('FarmaPlusV2 formulas vs restored SQL data', () => {
@@ -150,6 +165,85 @@ describe('FarmaPlusV2 formulas vs restored SQL data', () => {
     }
     assert.equal(writeOffFullBoxes(50, 0, 12, 5).ok, false);
     assert.equal(writeOffFullBoxes(50, 0, 12, 0).ok, false);
+    const emptied = writeOffFullBoxes(30, 29, 30, 1);
+    assert.equal(emptied.ok, true);
+    if (emptied.ok) {
+      assert.equal(emptied.fromDispatch, 30);
+      assert.equal(emptied.dispatchQty, 29);
+      assert.equal(emptied.warehouseQty, 0);
+    }
+  });
+
+  it('empty dispatch pulls remaining warehouse onto the counter', () => {
+    assert.deepEqual(replenishDispatchFromWarehouse(0, 26), { dispatchQty: 26, warehouseQty: 0, moved: 26 });
+    assert.deepEqual(replenishDispatchFromWarehouse(11, 10), { dispatchQty: 11, warehouseQty: 10, moved: 0 });
+    assert.deepEqual(replenishDispatchFromWarehouse(0, 0), { dispatchQty: 0, warehouseQty: 0, moved: 0 });
+    assert.deepEqual(stockFieldsFromBins(0, 8), { stock: 8, dispatchQty: 8, warehouseQty: 0 });
+    assert.deepEqual(nextIntakeBins(0, 0, 30, 'warehouse'), { dispatch: 30, warehouse: 0, existence: 30 });
+    const soldAllDispatch = consumeDispatchFirst(11, 10, 11);
+    assert.equal(soldAllDispatch.fromDispatch, 11);
+    assert.equal(soldAllDispatch.fromWarehouse, 0);
+    assert.equal(soldAllDispatch.dispatchQty, 10);
+    assert.equal(soldAllDispatch.warehouseQty, 0);
+  });
+
+  it('writeOffToRemaining zeros leftovers or matches a physical count', () => {
+    const zero = writeOffToRemaining(26, 0, 0, 30);
+    assert.equal(zero.ok, true);
+    if (zero.ok) {
+      assert.equal(zero.units, 26);
+      assert.equal(zero.dispatchQty, 0);
+      assert.equal(zero.remaining, 0);
+    }
+    const keep20 = writeOffToRemaining(26, 0, 20, 30);
+    assert.equal(keep20.ok, true);
+    if (keep20.ok) {
+      assert.equal(keep20.units, 6);
+      assert.equal(keep20.dispatchQty, 20);
+    }
+    const split = writeOffToRemaining(20, 6, 0, 30);
+    assert.equal(split.ok, true);
+    if (split.ok) {
+      assert.equal(split.fromDispatch, 20);
+      assert.equal(split.fromWarehouse, 6);
+    }
+    assert.equal(writeOffToRemaining(26, 0, 26, 30).ok, false);
+    assert.equal(writeOffToRemaining(26, 0, 30, 30).ok, false);
+  });
+
+  it('applyIntakeWithRemaining writes off leftovers then adds the intake', () => {
+    const zeroThen30 = applyIntakeWithRemaining(26, 0, 30, 'dispatch', 0, 30);
+    assert.equal(zeroThen30.ok, true);
+    if (zeroThen30.ok) {
+      assert.equal(zeroThen30.wroteOff, 26);
+      assert.equal(zeroThen30.bins.existence, 30);
+      assert.equal(zeroThen30.bins.dispatch, 30);
+    }
+    const keep20Then30 = applyIntakeWithRemaining(26, 0, 30, 'dispatch', 20, 30);
+    assert.equal(keep20Then30.ok, true);
+    if (keep20Then30.ok) {
+      assert.equal(keep20Then30.wroteOff, 6);
+      assert.equal(keep20Then30.bins.existence, 50);
+    }
+    const noAdjust = applyIntakeWithRemaining(26, 0, 30, 'dispatch');
+    assert.equal(noAdjust.ok, true);
+    if (noAdjust.ok) {
+      assert.equal(noAdjust.wroteOff, 0);
+      assert.equal(noAdjust.bins.existence, 56);
+    }
+    const sameCount = applyIntakeWithRemaining(26, 0, 30, 'dispatch', 26, 30);
+    assert.equal(sameCount.ok, true);
+    if (sameCount.ok) {
+      assert.equal(sameCount.wroteOff, 0);
+      assert.equal(sameCount.bins.existence, 56);
+    }
+    const toWarehouse = applyIntakeWithRemaining(26, 0, 30, 'warehouse', 0, 30);
+    assert.equal(toWarehouse.ok, true);
+    if (toWarehouse.ok) {
+      assert.equal(toWarehouse.bins.dispatch, 30);
+      assert.equal(toWarehouse.bins.warehouse, 0);
+    }
+    assert.equal(applyIntakeWithRemaining(26, 0, 30, 'dispatch', 30, 30).ok, false);
   });
 
   it('Intake line recalc derives unit cost, P1, and amount from cost', () => {
@@ -196,8 +290,8 @@ describe('FarmaPlusV2 formulas vs restored SQL data', () => {
     const sold = consumeDispatchFirst(11, 10, 13);
     assert.equal(sold.fromDispatch, 11);
     assert.equal(sold.fromWarehouse, 2);
-    assert.equal(sold.dispatchQty, 0);
-    assert.equal(sold.warehouseQty, 8);
+    assert.equal(sold.dispatchQty, 8);
+    assert.equal(sold.warehouseQty, 0);
     assert.deepEqual(catalogPricesAfterIntake(2.5, 3), { destination: 'warehouse', salePrice1: 2.5, salePrice2: 3 });
     assert.deepEqual(catalogPricesAfterIntake(2, 3), { destination: 'warehouse', salePrice1: 2, salePrice2: 3 });
     assert.deepEqual(catalogPricesAfterIntake(2, 2), { destination: 'dispatch', salePrice1: 2, salePrice2: 2 });
@@ -228,6 +322,22 @@ describe('FarmaPlusV2 formulas vs restored SQL data', () => {
     });
   });
 
+  it('physical remaining reallocates leftover lots to 0 or a counted qty', () => {
+    const lot = { id: 1, quantity: 26, expiresAt: '2026-12-01' };
+    assert.equal(allocateLotRemainings([lot], 0)[0].remaining, 0);
+    assert.equal(allocateLotRemainings([lot], 10)[0].remaining, 10);
+    assert.equal(allocateLotRemainings([lot], 26)[0].remaining, 26);
+    const split = allocateLotRemainings(
+      [
+        { id: 1, quantity: 20, expiresAt: '2026-06-01' },
+        { id: 2, quantity: 6, expiresAt: '2027-01-01' },
+      ],
+      10,
+    );
+    assert.equal(split[0].remaining, 4);
+    assert.equal(split[1].remaining, 6);
+  });
+
   it('FEFO keeps leftover of the older lot and does not overwrite a newer expiration', () => {
     const lots = allocateLotRemainings(
       [
@@ -240,6 +350,40 @@ describe('FarmaPlusV2 formulas vs restored SQL data', () => {
     assert.equal(lots[1].remaining, 1000);
     assert.equal(lots[0].expiresAt, '2026-06-16');
     assert.equal(lots[1].expiresAt, '2027-01-10');
+  });
+
+  it('pharmacy calendar stays on the Nicaragua day after 18:00', () => {
+    const evening = new Date('2026-10-03T00:30:00.000Z');
+    assert.equal(calendarDateIso(evening), '2026-10-02');
+    assert.equal(calendarDateUtc(evening).toISOString(), '2026-10-02T00:00:00.000Z');
+    const justBeforeMidnight = new Date('2026-10-03T05:59:00.000Z');
+    assert.equal(calendarDateIso(justBeforeMidnight), '2026-10-02');
+    const localMidnight = new Date('2026-10-03T06:00:00.000Z');
+    assert.equal(calendarDateIso(localMidnight), '2026-10-03');
+    assert.equal(calendarDateUtc('2026-10-02').toISOString(), '2026-10-02T00:00:00.000Z');
+  });
+
+  it('automatic cash cuts split the Nicaragua day at 10, 13 and 16', () => {
+    assert.equal(calendarHour(new Date('2026-10-03T16:00:00.000Z')), 10);
+    assert.equal(calendarHour(new Date('2026-10-03T19:00:00.000Z')), 13);
+    assert.equal(calendarHour(new Date('2026-10-03T22:00:00.000Z')), 16);
+    assert.equal(cashCutKeyByHour(9), 'cut10');
+    assert.equal(cashCutKeyByHour(10), 'cut13');
+    assert.equal(cashCutKeyByHour(15), 'cut16');
+    assert.equal(cashCutKeyByHour(16), 'close');
+    const shiftAt = Date.parse('2026-10-03T22:10:00.000Z');
+    assert.equal(cashCutKeyForInvoice(16, Date.parse('2026-10-03T22:05:00.000Z'), shiftAt), 'cut16');
+    assert.equal(cashCutKeyForInvoice(16, Date.parse('2026-10-03T22:20:00.000Z'), shiftAt), 'close');
+    assert.equal(cashSaleAmount(100, 20), 80);
+    assert.equal(expectedDrawerCash(500, 1000, 50, 100), 1350);
+    assert.equal(drawerDifference(1340, 1350), -10);
+    assert.equal(salesMinusExpenses(1000, 150), 850);
+    const cuts = emptyCashCuts();
+    addInvoiceToCashCut(cuts, 9, { status: 'PAID', total: 100, cardAmount: 0, profit: 20 });
+    addInvoiceToCashCut(cuts, 18, { status: 'PAID', total: 50, cardAmount: 50, profit: 8 });
+    assert.equal(cuts.cut10.total, 100);
+    assert.equal(cuts.close.card, 50);
+    assert.equal(cuts.close.cash, 0);
   });
 
   it('expiry window looks 3 months back from the as-of date', () => {

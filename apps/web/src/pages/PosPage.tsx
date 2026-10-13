@@ -23,6 +23,7 @@ import { Client } from '../types/catalog';
 import { cartToReceiptLines, invoiceToReceipt, paymentModeLabel } from '../types/receipt';
 import { InvoiceDetail } from '../types/sales';
 import { Settings } from '../types/settings';
+import { todayIso } from '../utils/dates';
 import { formatMoney } from '../utils/numbers';
 
 export default function PosPage() {
@@ -52,7 +53,7 @@ export default function PosPage() {
       invoiceNumber,
       paymentMode: paymentModeLabel(cash, card),
       cashier: user?.username || '',
-      date: new Date().toISOString().slice(0, 10),
+      date: todayIso(),
       lines: cartToReceiptLines(cart).map((line) => ({
         ...line,
         amount: lineAmount(line.price, line.quantity),

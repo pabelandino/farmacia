@@ -79,6 +79,12 @@ export class IntakeLineDto {
   @IsOptional()
   @IsIn(['dispatch', 'warehouse'])
   destination?: 'dispatch' | 'warehouse';
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  physicalRemaining?: number;
 }
 
 export class UpsertIntakeDto {

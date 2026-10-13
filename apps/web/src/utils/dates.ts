@@ -1,11 +1,8 @@
-import { EXPIRY_ALERT_MONTHS, addCalendarMonths } from '@farmaplus/domain';
+import { EXPIRY_ALERT_MONTHS, addCalendarMonths, calendarDateIso, calendarDateUtc } from '@farmaplus/domain';
 
-/** Local calendar day as YYYY-MM-DD (not UTC, so evening in UTC-6 stays today). */
+/** Pharmacy calendar day (America/Managua), not the UTC day. */
 export function todayIso(at = new Date()) {
-  const year = at.getFullYear();
-  const month = String(at.getMonth() + 1).padStart(2, '0');
-  const day = String(at.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
+  return calendarDateIso(at);
 }
 
 export function monthsAgoIso(months = EXPIRY_ALERT_MONTHS) {
@@ -13,9 +10,9 @@ export function monthsAgoIso(months = EXPIRY_ALERT_MONTHS) {
 }
 
 export function isoDate(offsetDays = 0) {
-  const date = new Date();
-  date.setDate(date.getDate() + offsetDays);
-  return todayIso(date);
+  const utc = calendarDateUtc();
+  utc.setUTCDate(utc.getUTCDate() + offsetDays);
+  return utc.toISOString().slice(0, 10);
 }
 
 export function dateOnly(value: string) {
@@ -49,22 +46,27 @@ export function formatReportDate(value: string | Date | null | undefined) {
   return `${day}/${month}/${year}`;
 }
 
-/** Parse a typed day/month/year value into ISO yyyy-mm-dd. */
+function isValidCalendarDay(year: number, month: number, day: number) {
+  const utc = new Date(Date.UTC(year, month - 1, day));
+  return utc.getUTCFullYear() === year && utc.getUTCMonth() === month - 1 && utc.getUTCDate() === day;
+}
+
+/** Parse a typed day/month/year value into ISO yyyy-mm-dd. Requires a 4-digit year. */
 export function parseDmyToIso(value: string) {
   const trimmed = value.trim();
   if (!trimmed) return '';
-  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+    const [year, month, day] = trimmed.split('-').map(Number);
+    return year && month && day && isValidCalendarDay(year, month, day) ? trimmed : '';
+  }
   const parts = trimmed.split(/[/\-.]/);
   if (parts.length !== 3) return '';
   const [dayPart, monthPart, yearPart] = parts;
-  if (!dayPart || !monthPart || !yearPart) return '';
-  const year = yearPart.length === 2 ? `20${yearPart}` : yearPart;
-  if (year.length !== 4) return '';
-  const day = Number(dayPart);
+  if (!dayPart || !monthPart || yearPart?.length !== 4) return '';
+  const year = Number(yearPart);
   const month = Number(monthPart);
-  if (!day || !month || month < 1 || month > 12 || day < 1 || day > 31) return '';
-  const iso = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-  const parsed = new Date(`${iso}T00:00:00`);
-  if (Number.isNaN(parsed.getTime()) || parsed.getDate() !== day || parsed.getMonth() + 1 !== month) return '';
-  return iso;
+  const day = Number(dayPart);
+  if (!year || !month || !day || month < 1 || month > 12 || day < 1 || day > 31) return '';
+  if (!isValidCalendarDay(year, month, day)) return '';
+  return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 }

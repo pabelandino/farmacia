@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from 'react';
-import { isHigherSalePrice, unitCostFromBox } from '@farmaplus/domain';
+import { hasPermission, isHigherSalePrice, unitCostFromBox } from '@farmaplus/domain';
 import { api } from '../api/client';
 import { getUser } from '../api/session';
 import { Field } from '../components/Field';
@@ -57,7 +57,7 @@ export default function ProductsPage() {
   const { message, error, setMessage, catchError } = useFeedback();
   const { lookups, addLookup } = useProductLookups();
   const [saving, setSaving] = useState(false);
-  const canEdit = getUser()?.role === 'ADMIN';
+  const canEdit = hasPermission(getUser(), 'editProducts');
 
   function load(q = query, nextPage = page) {
     const skip = (nextPage - 1) * PAGE_SIZE;

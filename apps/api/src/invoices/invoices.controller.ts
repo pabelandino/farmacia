@@ -17,19 +17,19 @@ export class InvoicesController {
   }
 
   @Get('recent')
-  @RequirePermission('billing', 'invoices')
+  @RequirePermission('billing', 'invoices', 'voidInvoice')
   recent(@Query() query: InvoiceQueryDto) {
     return this.invoices.recent(query);
   }
 
   @Get()
-  @RequirePermission('billing', 'invoices')
+  @RequirePermission('billing', 'invoices', 'voidInvoice')
   search(@Query() query: InvoiceQueryDto) {
     return this.invoices.search(query);
   }
 
   @Get(':id')
-  @RequirePermission('billing', 'invoices')
+  @RequirePermission('billing', 'invoices', 'voidInvoice')
   get(@Param('id', ParseIntPipe) id: number) {
     return this.invoices.get(id);
   }

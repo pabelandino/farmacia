@@ -23,6 +23,7 @@ You are deploying or upgrading a **local LAN** pharmacy system. You are not depl
 - After an upgrade, wait until `elsasoft-app` is up and `http://localhost/` returns the login page
 - Set a long random `JWT_SECRET` in `.env` on the server (not `change-me-in-production`)
 - If a rebuild still uses old files (`CACHED` on `COPY`), run `build --no-cache app` then `up -d app` (two commands)
+- Day-to-day backup is Settings → Crear respaldo. Keep a copy of the `.sql.gz` off the server (USB or another PC)
 
 **MUST NOT**
 
@@ -34,7 +35,7 @@ You are deploying or upgrading a **local LAN** pharmacy system. You are not depl
 - Install the PWA / desktop app against `http://192.168.x.x/`
 - Expose port 80 or 5432 beyond the private LAN
 - Copy `node_modules` between machines
-- Assume the Settings “Crear respaldo” button works inside the `app` container (it calls `docker exec` on the host). Dump from the host as in [Respaldo](#respaldo)
+- Tell operators the Settings backup button cannot work after this image — it dumps from inside the app
 
 **Compose project name:** always `-p elsasoft` so the app image is `elsasoft-app:latest`.
 
@@ -420,12 +421,14 @@ No uses `down -v`. Corrige la imagen o el `.env` y vuelve a `up -d app`.
 
 ## Respaldo
 
-Saca el dump en el **Windows anfitrión** (CLI de Docker), no desde la SPA, mientras la app corre en Docker:
+En Elsa SYS: **Configuración → Crear respaldo**. Elige USB o Documentos. El archivo es `respaldo_fecha.sql.gz`.
 
-Git Bash / WSL:
+Si el botón no está (imagen vieja) o falla, saca el dump en el **Windows anfitrión** mientras la app corre:
 
-```bash
-docker exec elsasoft-postgres pg_dump -U farmacia -d farmaplus --encoding=UTF8 --create --clean --if-exists --blobs | gzip -9 > respaldo_$(date +%d-%m-%Y).sql.gz
+```powershell
+cd C:\ElsaSYS\farmacia
+docker exec elsasoft-postgres pg_dump -U farmacia -d farmaplus --encoding=UTF8 --create --clean --if-exists --blobs -f /tmp/respaldo.sql
+docker cp elsasoft-postgres:/tmp/respaldo.sql .\respaldo_01-10-2026.sql
 ```
 
 Guarda copias fuera del servidor (USB u otro PC). Ese archivo se restaura con los [pasos del dump](#restaurar-un-dump-de-elsa-sqlgz).
@@ -473,7 +476,7 @@ Guarda copias fuera del servidor (USB u otro PC). Ese archivo se restaura con lo
 | La PWA queda muerta tras reiniciar el router                              | La instalaron con IP de DHCP. Reinstalar desde `http://elsasys/`                                                                               |
 | Catálogo vacío o no entra el usuario tras el deploy                       | Postgres arrancó limpio. Restaura el `.sql` / `.sql.gz` ([pasos](#restaurar-un-dump-de-elsa-sqlgz-o-sql))                                      |
 | Login 401 al cambiar de máquina                                           | Otro `JWT_SECRET`; hay que volver a entrar. Los datos siguen en Postgres                                                                       |
-| Falla “Crear respaldo” en Configuración                                   | Esperable en este layout Docker. Dump desde el host ([Respaldo](#respaldo))                                                                    |
+| Falla “Crear respaldo” en Configuración                                   | Imagen vieja (la app no tenía `pg_dump`). Copia el `Dockerfile` actual, `build --no-cache app` y `up -d app`. El archivo vacío de un intento fallido se puede borrar. |
 | Hicieron `down` y no hay datos                                            | Usaron `-v`. No lo hagas. Restaura el `.sql.gz` si existe                                                                                      |
 | Docker Desktop no arranca o WSL 2 no está                                 | Faltan [utilidades de Windows](#utilidades-de-windows-para-docker). PowerShell admin, los 4 comandos, reiniciar                                |
 | `No workspaces found: --workspace=web`                                    | Falta `apps/web/package.json` o se usó un lock viejo. Copia `apps/` y `packages/` completos. El `Dockerfile` actual instala con `--workspaces` |

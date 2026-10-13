@@ -1,14 +1,9 @@
 import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
-import { consumeDispatchFirst, existenceQty, higherSalePrice, lineAmount, lineProfit, markupPercent, voidRestoreSplit } from '@farmaplus/domain';
+import { consumeDispatchFirst, existenceQty, higherSalePrice, lineAmount, lineProfit, markupPercent, stockFieldsFromBins, voidRestoreSplit } from '@farmaplus/domain';
 import { InvoiceStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { dateOnly } from '../dates';
 import { CreateInvoiceDto, InvoiceQueryDto } from './dto/invoice.dto';
-
-function dateOnly(value?: string) {
-  if (value) return new Date(`${value}T00:00:00.000Z`);
-  const today = new Date();
-  return new Date(Date.UTC(today.getFullYear(), today.getMonth(), today.getDate()));
-}
 
 function addDays(base: Date, days: number) {
   const next = new Date(base);
@@ -193,14 +188,15 @@ export class InvoicesService {
         include: { items: true, client: true },
       });
 
+      const seen = new Set<number>();
       for (const line of prepared) {
+        if (seen.has(line.product.id)) continue;
+        seen.add(line.product.id);
+        const next = bins.get(line.product.id);
+        if (!next) continue;
         await tx.product.update({
           where: { id: line.product.id },
-          data: {
-            stock: { decrement: line.split.fromDispatch },
-            dispatchQty: { decrement: line.split.fromDispatch },
-            warehouseQty: { decrement: line.split.fromWarehouse },
-          },
+          data: stockFieldsFromBins(next.dispatch, next.warehouse),
         });
       }
 
@@ -264,23 +260,31 @@ export class InvoicesService {
       throw new BadRequestException('La factura ya está anulada');
     }
     return this.prisma.$transaction(async (tx) => {
+      const bins = new Map<number, { dispatch: number; warehouse: number }>();
       for (const item of invoice.items) {
-        if (!item.productId) continue;
+        if (!item.productId || !item.product) continue;
         const split = voidRestoreSplit({
           quantity: Number(item.quantity),
           fromDispatch: Number(item.fromDispatch),
           fromWarehouse: Number(item.fromWarehouse),
           unitPrice: Number(item.unitPrice),
-          salePrice1: item.product ? Number(item.product.salePrice1) : undefined,
-          salePrice2: item.product ? Number(item.product.salePrice2) : undefined,
+          salePrice1: Number(item.product.salePrice1),
+          salePrice2: Number(item.product.salePrice2),
         });
+        const current = bins.get(item.productId) || {
+          dispatch: Number(item.product.dispatchQty),
+          warehouse: Number(item.product.warehouseQty),
+        };
+        const next = stockFieldsFromBins(
+          current.dispatch + split.fromDispatch,
+          current.warehouse + split.fromWarehouse,
+        );
+        bins.set(item.productId, { dispatch: next.dispatchQty, warehouse: next.warehouseQty });
+      }
+      for (const [productId, next] of bins) {
         await tx.product.update({
-          where: { id: item.productId },
-          data: {
-            stock: { increment: split.fromDispatch },
-            dispatchQty: { increment: split.fromDispatch },
-            warehouseQty: { increment: split.fromWarehouse },
-          },
+          where: { id: productId },
+          data: stockFieldsFromBins(next.dispatch, next.warehouse),
         });
       }
       if (invoice.paymentMethod === 'Credito') {

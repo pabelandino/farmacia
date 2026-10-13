@@ -250,6 +250,32 @@ model Receipt {
   @@map("receipts")
 }
 
+model CashSession {
+  id            Int       @id @default(autoincrement())
+  date          DateTime  @unique @db.Date
+  openedAt      DateTime?
+  openedBy      String?
+  openingAmount Decimal   @default(0) @db.Decimal(18, 2)
+  closedAt           DateTime?
+  closedBy           String?
+  countedCash        Decimal?  @db.Decimal(18, 2)
+  countedCard        Decimal?  @db.Decimal(18, 2)
+  expectedCash       Decimal?  @db.Decimal(18, 2)
+  difference         Decimal?  @db.Decimal(18, 2)
+  notes              String?
+  shiftClosedAt      DateTime?
+  shiftClosedBy      String?
+  shiftCountedCash   Decimal?  @db.Decimal(18, 2)
+  shiftCountedCard   Decimal?  @db.Decimal(18, 2)
+  shiftExpectedCash  Decimal?  @db.Decimal(18, 2)
+  shiftDifference    Decimal?  @db.Decimal(18, 2)
+  shiftCut           Json?
+  finalCut           Json?
+  createdAt     DateTime  @default(now())
+
+  @@map("cash_sessions")
+}
+
 model CashEntry {
   id                 Int       @id @default(autoincrement())
   userName           String?
@@ -259,6 +285,7 @@ model CashEntry {
   returnExpense      Decimal   @default(0) @db.Decimal(18, 4)
   card               Decimal   @default(0) @db.Decimal(18, 4)
   cardAuth           String?
+  notes              String?
   date               DateTime? @db.Date
 
   @@index([date])

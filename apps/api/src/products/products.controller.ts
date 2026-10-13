@@ -1,6 +1,6 @@
 import { Body, Controller, Get, Inject, Param, ParseIntPipe, Post, Put, Query, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
-import { AdminOnly, RequirePermission } from '../auth/permissions.decorator';
+import { RequirePermission } from '../auth/permissions.decorator';
 import { PermissionsGuard } from '../auth/permissions.guard';
 import { CatalogNameDto, ProductQueryDto, UpsertProductDto } from './dto/product.dto';
 import { ProductsService } from './products.service';
@@ -23,13 +23,13 @@ export class ProductsController {
   }
 
   @Post('brands')
-  @AdminOnly()
+  @RequirePermission('editProducts')
   createBrand(@Body() dto: CatalogNameDto) {
     return this.products.createBrand(dto);
   }
 
   @Post('categories')
-  @AdminOnly()
+  @RequirePermission('editProducts')
   createCategory(@Body() dto: CatalogNameDto) {
     return this.products.createCategory(dto);
   }
@@ -47,13 +47,13 @@ export class ProductsController {
   }
 
   @Post()
-  @AdminOnly()
+  @RequirePermission('editProducts')
   create(@Body() dto: UpsertProductDto) {
     return this.products.create(dto);
   }
 
   @Put(':id')
-  @AdminOnly()
+  @RequirePermission('editProducts')
   update(@Param('id', ParseIntPipe) id: number, @Body() dto: UpsertProductDto) {
     return this.products.update(id, dto);
   }
