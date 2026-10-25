@@ -15,6 +15,7 @@ const ReceivablesPage = lazy(() => import('./pages/ReceivablesPage'));
 const IntakesPage = lazy(() => import('./pages/IntakesPage'));
 const WriteOffsPage = lazy(() => import('./pages/WriteOffsPage'));
 const CashPage = lazy(() => import('./pages/CashPage'));
+const ExpensesPage = lazy(() => import('./pages/ExpensesPage'));
 const ProductsPage = lazy(() => import('./pages/ProductsPage'));
 const ClientsPage = lazy(() => import('./pages/ClientsPage'));
 const ReportsPage = lazy(() => import('./pages/ReportsPage'));
@@ -22,6 +23,7 @@ const SalesDayReportPage = lazy(() => import('./pages/SalesDayReportPage'));
 const InventoryReportPage = lazy(() => import('./pages/InventoryReportPage'));
 const SalesLinesReportPage = lazy(() => import('./pages/SalesLinesReportPage'));
 const InvoicesReportPage = lazy(() => import('./pages/InvoicesReportPage'));
+const VoidInvoicesPage = lazy(() => import('./pages/VoidInvoicesPage'));
 const ExpiredProductsReportPage = lazy(() => import('./pages/ExpiredProductsReportPage'));
 const PayablesReportPage = lazy(() => import('./pages/PayablesReportPage'));
 const SettingsPage = lazy(() => import('./pages/SettingsPage'));
@@ -51,6 +53,7 @@ function ProtectedShell() {
           <Route path="/bajas" element={<GuardedRoute permission="writeOffs"><WriteOffsPage /></GuardedRoute>} />
           <Route path="/inventario" element={<Navigate to="/reportes/inventario" replace />} />
           <Route path="/caja" element={<GuardedRoute permission="cash"><CashPage /></GuardedRoute>} />
+          <Route path="/egresos" element={<GuardedRoute permission="expenses"><ExpensesPage /></GuardedRoute>} />
           <Route path="/productos" element={<GuardedRoute permission="products"><ProductsPage /></GuardedRoute>} />
           <Route path="/clientes" element={<GuardedRoute permission="clients"><ClientsPage /></GuardedRoute>} />
           <Route path="/traslados" element={<GuardedRoute permission="transfers"><TransfersPage /></GuardedRoute>} />
@@ -63,7 +66,8 @@ function ProtectedShell() {
           <Route path="/reportes/vencidos" element={<GuardedRoute permission="reports"><ExpiredProductsReportPage /></GuardedRoute>} />
           <Route path="/reportes/cxc" element={<GuardedRoute permission="reports"><ReceivablesPage /></GuardedRoute>} />
           <Route path="/reportes/cxp" element={<GuardedRoute permission="reports"><PayablesReportPage /></GuardedRoute>} />
-          <Route path="/reportes/facturas" element={<GuardedRoute any={['invoices', 'reports']}><InvoicesReportPage /></GuardedRoute>} />
+          <Route path="/anular" element={<GuardedRoute permission="voidInvoice"><VoidInvoicesPage /></GuardedRoute>} />
+          <Route path="/reportes/facturas" element={<GuardedRoute permission="reports"><InvoicesReportPage /></GuardedRoute>} />
           <Route path="/configuracion" element={<GuardedRoute permission="settings"><SettingsPage /></GuardedRoute>} />
         </Routes>
       </Suspense>

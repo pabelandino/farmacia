@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from 'react';
-import { api, pickSaveLocation, saveAuthedFile } from '../api/client';
+import { api, exportAuthedFile } from '../api/client';
 import { ConfirmModal } from '../components/ConfirmModal';
 import { Field } from '../components/Field';
 import { Panel } from '../components/Panel';
@@ -131,18 +131,15 @@ export default function SettingsPage() {
   }
 
   async function exportPg() {
-    const name = backupFileName();
-    let handle: FileSystemFileHandle | null = null;
-    try {
-      handle = await pickSaveLocation(name, LABELS.backupPgFileType);
-    } catch {
-      return;
-    }
     setExporting(true);
     setError('');
     try {
-      await saveAuthedFile('/api/settings/backup-pg', name, handle);
-      toastSuccess(LABELS.backupPgDone);
+      const saved = await exportAuthedFile(
+        '/api/settings/backup-pg',
+        backupFileName(),
+        LABELS.backupPgFileType,
+      );
+      if (saved) toastSuccess(LABELS.backupPgDone);
     } catch (err) {
       catchError(err, LABELS.backupPgFailed);
     } finally {

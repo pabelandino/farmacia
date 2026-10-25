@@ -1,20 +1,19 @@
-import { Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import {
   DEFAULT_UTILITY_PERCENT,
+  applyIntakeWithRemaining,
   catalogPricesAfterIntake,
+  consumeDispatchFirst,
   intakeTotal,
+  nextIntakeBins,
   salePriceFromMarkup,
+  stockFieldsFromBins,
   unitCostFromBox,
 } from '@farmaplus/domain';
 import { Prisma } from '@prisma/client';
+import { dateOnly } from '../dates';
 import { PrismaService } from '../prisma/prisma.service';
 import { IntakeLineDto, IntakeQueryDto, UpsertIntakeDto } from './dto/intake.dto';
-
-function dateOnly(value?: string) {
-  if (value) return new Date(`${value.slice(0, 10)}T00:00:00.000Z`);
-  const today = new Date();
-  return new Date(Date.UTC(today.getFullYear(), today.getMonth(), today.getDate()));
-}
 
 function money(value: Prisma.Decimal | number | string) {
   return Number(value);
@@ -96,7 +95,7 @@ export class IntakesService {
         userName,
         total,
         lines: {
-          create: prepared.map(({ product, ...line }) => ({
+          create: prepared.map(({ product, physicalRemaining: _physicalRemaining, ...line }) => ({
             ...line,
             productId: product.id,
           })),
@@ -105,7 +104,7 @@ export class IntakesService {
       include: { lines: true },
     });
     for (const line of prepared) {
-      await this.applyStock(tx, line.product.id, line.quantity, line.destination);
+      await this.applyLineStock(tx, line.product.id, line.quantity, line.destination, line.physicalRemaining);
     }
     return intake;
   }
@@ -164,6 +163,7 @@ export class IntakesService {
 
     return {
       product,
+      physicalRemaining: line.physicalRemaining,
       sku: line.sku,
       productName: line.productName,
       generic: line.generic || null,
@@ -184,24 +184,54 @@ export class IntakesService {
     };
   }
 
-  private applyStock(
+  private async applyLineStock(
+    tx: Prisma.TransactionClient,
+    productId: number,
+    qty: number,
+    destination: string,
+    physicalRemaining?: number,
+  ) {
+    const product = await tx.product.findUnique({ where: { id: productId } });
+    if (!product) throw new NotFoundException('Producto no encontrado');
+    const result = applyIntakeWithRemaining(
+      Number(product.dispatchQty),
+      Number(product.warehouseQty),
+      qty,
+      destination === 'warehouse' ? 'warehouse' : 'dispatch',
+      physicalRemaining,
+      product.unitsPerBox,
+    );
+    if (!result.ok) {
+      throw new BadRequestException('No puede quedar más de lo que hay ahora');
+    }
+    return tx.product.update({
+      where: { id: productId },
+      data: stockFieldsFromBins(result.bins.dispatch, result.bins.warehouse),
+    });
+  }
+
+  private async applyStock(
     tx: Prisma.TransactionClient,
     productId: number,
     qty: number,
     destination: string,
   ) {
-    if (destination === 'warehouse') {
+    const product = await tx.product.findUnique({ where: { id: productId } });
+    if (!product) throw new NotFoundException('Producto no encontrado');
+    const dispatch = Number(product.dispatchQty);
+    const warehouse = Number(product.warehouseQty);
+    const dest = destination === 'warehouse' ? 'warehouse' : 'dispatch';
+    if (qty >= 0) {
+      const next = nextIntakeBins(dispatch, warehouse, qty, dest);
       return tx.product.update({
         where: { id: productId },
-        data: { warehouseQty: { increment: qty } },
+        data: stockFieldsFromBins(next.dispatch, next.warehouse),
       });
     }
+    const split = consumeDispatchFirst(dispatch, warehouse, -qty);
     return tx.product.update({
       where: { id: productId },
-      data: {
-        stock: { increment: qty },
-        dispatchQty: { increment: qty },
-      },
+      data: stockFieldsFromBins(split.dispatchQty, split.warehouseQty),
     });
   }
 }

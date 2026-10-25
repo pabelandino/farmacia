@@ -18,6 +18,14 @@ async function bootstrap() {
   app.enableCors({ origin: true, credentials: true });
   app.setGlobalPrefix('api');
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
+  app.set('etag', false);
+  app.use((req: { originalUrl?: string }, res: { setHeader: (name: string, value: string) => void }, next: () => void) => {
+    if (String(req.originalUrl || '').startsWith('/api')) {
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+      res.setHeader('Pragma', 'no-cache');
+    }
+    next();
+  });
   attachSpa(app);
 
   await app.listen(port, host);

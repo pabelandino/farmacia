@@ -1,14 +1,9 @@
 import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
-import { writeOffFullBoxes } from '@farmaplus/domain';
+import { stockFieldsFromBins, writeOffFullBoxes } from '@farmaplus/domain';
 import { Prisma } from '@prisma/client';
+import { dateOnly } from '../dates';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateWriteOffDto, WriteOffQueryDto } from './dto/write-off.dto';
-
-function dateOnly(value?: string) {
-  if (value) return new Date(`${value.slice(0, 10)}T00:00:00.000Z`);
-  const today = new Date();
-  return new Date(Date.UTC(today.getFullYear(), today.getMonth(), today.getDate()));
-}
 
 @Injectable()
 export class WriteOffsService {
@@ -65,11 +60,7 @@ export class WriteOffsService {
     return this.prisma.$transaction(async (tx) => {
       await tx.product.update({
         where: { id: product.id },
-        data: {
-          stock: { decrement: result.fromDispatch },
-          dispatchQty: { decrement: result.fromDispatch },
-          warehouseQty: { decrement: result.fromWarehouse },
-        },
+        data: stockFieldsFromBins(result.dispatchQty, result.warehouseQty),
       });
       return tx.writeOff.create({
         data: {

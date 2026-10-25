@@ -239,7 +239,14 @@ html.dark textarea::placeholder {
   }
 
   .pos-receipt-cols {
-    grid-template-columns: minmax(0, 1fr) 2.6rem 3.6rem 3.8rem;
+    grid-template-columns: minmax(0, 1fr) 2.8rem 3.6rem 3.8rem;
+    column-gap: 0.35rem;
+  }
+
+  .pos-receipt-sku {
+    padding-right: 0.2rem;
+    overflow-wrap: anywhere;
+    word-break: break-all;
   }
 
   .pos-receipt .border-dotted,

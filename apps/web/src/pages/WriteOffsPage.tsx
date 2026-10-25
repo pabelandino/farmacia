@@ -20,7 +20,7 @@ import { useFeedback } from '../hooks/useFeedback';
 import { useProductSearch } from '../hooks/useProductSearch';
 import { Product } from '../types/catalog';
 import { WriteOffsPageData } from '../types/writeOffs';
-import { formatReportDate } from '../utils/dates';
+import { formatReportDate, todayIso } from '../utils/dates';
 import { formatQty, toNumber } from '../utils/numbers';
 
 export default function WriteOffsPage() {
@@ -29,7 +29,7 @@ export default function WriteOffsPage() {
   const [selected, setSelected] = useState<Product | null>(null);
   const [boxes, setBoxes] = useState(0);
   const [reason, setReason] = useState('');
-  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [date, setDate] = useState(() => todayIso());
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [page, setPage] = useState(1);

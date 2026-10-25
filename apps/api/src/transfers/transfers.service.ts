@@ -1,13 +1,8 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import { dateOnly } from '../dates';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateTransferDto, TransferQueryDto } from './dto/transfer.dto';
-
-function dateOnly(value?: string) {
-  if (value) return new Date(`${value}T00:00:00.000Z`);
-  const today = new Date();
-  return new Date(Date.UTC(today.getFullYear(), today.getMonth(), today.getDate()));
-}
 
 @Injectable()
 export class TransfersService {

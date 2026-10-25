@@ -50,6 +50,7 @@ export function ExistingLotsPanel({
           </tbody>
         </table>
       </TableWrap>
+      <p className="mt-2 text-sm text-amber-800">{LABELS.existingLotsQtyHint}</p>
     </div>
   );
 }

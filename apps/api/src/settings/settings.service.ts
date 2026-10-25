@@ -1,7 +1,9 @@
-import { existsSync, mkdirSync, createReadStream } from 'node:fs';
+import { createReadStream, createWriteStream, existsSync, mkdirSync, renameSync, statSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
+import { pipeline } from 'node:stream/promises';
+import { createGzip } from 'node:zlib';
 import { Inject, Injectable, BadRequestException } from '@nestjs/common';
 import { backupsDir } from '../backups-dir';
 import { PrismaService } from '../prisma/prisma.service';
@@ -21,26 +23,100 @@ const execFileAsync = promisify(execFile);
 const job: ImportJob = { status: 'idle', step: 'Sin importación', log: [] };
 
 const POSTGRES_CANDIDATES = ['elsasoft-postgres', 'farmaplus-postgres'];
+const HOST_PATH = ['/usr/lib/postgresql/16/bin', '/usr/local/bin', '/opt/homebrew/bin', '/usr/bin', '/bin', process.env.PATH || ''].join(':');
+const MIN_DUMP_BYTES = 100;
+const DUMP_FLAGS = ['--encoding=UTF8', '--create', '--clean', '--if-exists', '--blobs'];
+
+function dumpEnv() {
+  return { ...process.env, PATH: HOST_PATH, DATABASE_URL: databaseUrl() };
+}
+
+function dumpError(error: unknown) {
+  if (error && typeof error === 'object' && 'stderr' in error) {
+    const stderr = String((error as { stderr?: Buffer | string }).stderr || '').trim();
+    if (stderr) return stderr;
+  }
+  return error instanceof Error ? error.message : String(error);
+}
+
+function databaseUrl() {
+  return process.env.DATABASE_URL || 'postgresql://farmacia:farmacia@localhost:5432/farmaplus';
+}
+
+function unlinkQuiet(path: string) {
+  try {
+    unlinkSync(path);
+  } catch {
+    /* ignore leftover temp files */
+  }
+}
+
+function dumpFileReady(path: string) {
+  return existsSync(path) && statSync(path).size >= MIN_DUMP_BYTES;
+}
+
+async function streamDump(file: string, command: string, args: string[]) {
+  const tmp = `${file}.part`;
+  unlinkQuiet(tmp);
+  const child = spawn(command, args, { env: dumpEnv() });
+  let stderr = '';
+  child.stderr.on('data', (chunk) => {
+    stderr += String(chunk);
+  });
+  try {
+    await pipeline(child.stdout, createGzip({ level: 9 }), createWriteStream(tmp));
+  } catch (error) {
+    unlinkQuiet(tmp);
+    throw error;
+  }
+  const code = await new Promise<number | null>((resolve, reject) => {
+    if (child.exitCode != null) {
+      resolve(child.exitCode);
+      return;
+    }
+    child.once('error', reject);
+    child.once('close', resolve);
+  });
+  if (code !== 0) {
+    unlinkQuiet(tmp);
+    throw new Error(stderr.trim() || `${command} salió con código ${code}`);
+  }
+  if (!dumpFileReady(tmp)) {
+    unlinkQuiet(tmp);
+    throw new Error('El respaldo quedó vacío');
+  }
+  unlinkQuiet(file);
+  renameSync(tmp, file);
+}
 
 async function runningPostgresContainer() {
   const preferred = process.env.POSTGRES_CONTAINER?.trim();
   const wanted = preferred ? [preferred, ...POSTGRES_CANDIDATES] : [...POSTGRES_CANDIDATES];
   try {
-    const { stdout } = await execFileAsync('docker', ['ps', '--format', '{{.Names}}'], { timeout: 15000 });
+    const { stdout } = await execFileAsync('docker', ['ps', '--format', '{{.Names}}'], {
+      timeout: 15000,
+      env: dumpEnv(),
+    });
     const names = stdout.split(/\r?\n/).map((name) => name.trim()).filter(Boolean);
     for (const name of wanted) {
       if (names.includes(name)) return name;
     }
   } catch {
-    return wanted[0];
+    return '';
   }
-  return wanted[0];
+  return '';
 }
 
-function dumpCommand(container: string, file: string) {
+function dumpViaPgDump(file: string) {
+  return streamDump(file, 'pg_dump', [`--dbname=${databaseUrl()}`, ...DUMP_FLAGS]);
+}
+
+async function dumpViaDocker(file: string) {
+  const container = await runningPostgresContainer();
+  if (!container) throw new Error('No hay un contenedor de Postgres en ejecución');
   const user = process.env.POSTGRES_USER || 'farmacia';
   const db = process.env.POSTGRES_DB || 'farmaplus';
-  return `set -o pipefail; docker exec ${container} pg_dump -U ${user} -d ${db} --encoding=UTF8 --create --clean --if-exists --blobs | gzip -9 > "${file}"`;
+  return streamDump(file, 'docker', ['exec', container, 'pg_dump', '-U', user, '-d', db, ...DUMP_FLAGS]);
 }
 
 function respaldoFileName() {
@@ -140,20 +216,21 @@ export class SettingsService {
     const dir = backupsDir();
     mkdirSync(dir, { recursive: true });
     const file = join(dir, respaldoFileName());
-    const container = await runningPostgresContainer();
-    try {
-      await execFileAsync('bash', ['-lc', dumpCommand(container, file)], { timeout: 600000 });
-    } catch (error) {
-      const stderr = error && typeof error === 'object' && 'stderr' in error
-        ? String((error as { stderr?: Buffer | string }).stderr || '').trim()
-        : '';
-      const detail = stderr || (error instanceof Error ? error.message : String(error));
-      throw new BadRequestException(
-        `No se pudo generar el respaldo desde ${container}. ¿Está Docker encendido y Postgres corriendo? ${detail}`,
-      );
+    const errors: string[] = [];
+    for (const dump of [dumpViaPgDump, dumpViaDocker]) {
+      try {
+        await dump(file);
+        if (dumpFileReady(file)) return file;
+        unlinkQuiet(file);
+      } catch (error) {
+        unlinkQuiet(file);
+        unlinkQuiet(`${file}.part`);
+        errors.push(dumpError(error));
+      }
     }
-    if (!existsSync(file)) throw new BadRequestException('No se pudo generar el respaldo');
-    return file;
+    throw new BadRequestException(
+      `No se pudo generar el respaldo. ¿Está Postgres corriendo? ${errors.join(' ')}`,
+    );
   }
 
   dumpStream(file: string) {

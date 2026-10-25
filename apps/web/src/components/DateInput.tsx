@@ -41,12 +41,13 @@ export function DateInput({
           setEditing(true);
           setText(formatReportDate(value) || text);
         }}
-        onChange={(event) => {
-          const next = event.target.value;
-          setText(next);
-          const iso = parseDmyToIso(next);
-          if (iso) onChange(iso);
-          if (!next.trim()) onChange('');
+        onChange={(event) => setText(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter') {
+            event.preventDefault();
+            commit(text);
+            event.currentTarget.blur();
+          }
         }}
         onBlur={() => {
           commit(text);

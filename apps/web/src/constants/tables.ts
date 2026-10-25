@@ -17,16 +17,46 @@ export const CASH_DETAIL_COLUMNS = [
   'card',
   'operatingExpense',
   'returns',
+  'expenseDetail',
   'auth',
 ] as const satisfies readonly TableColumn[];
 
+export const EXPENSE_COLUMNS = [
+  'date',
+  'expenseAmount',
+  'expenseDetail',
+  'user',
+] as const satisfies readonly TableColumn[];
+
 export const CASH_STAT_KEYS = [
-  'movements',
-  'income',
-  'card',
-  'expenses',
-  'net',
+  'openingAmount',
+  'cashCut10',
+  'cashCut13',
+  'cashCut16',
+  'shiftCountedCash',
+  'shiftDifference',
+  'cashCutClose',
+  'expectedCash',
+  'countedCash',
+  'cashDifference',
 ] as const satisfies readonly LabelKey[];
+
+export const CASH_CUT_HINTS = {
+  cashCut10: 'cashCutHint10',
+  cashCut13: 'cashCutHint13',
+  cashCut16: 'cashCutHint16',
+  cashCutClose: 'cashCutHintClose',
+} as const satisfies Partial<Record<LabelKey, LabelKey>>;
+
+export const CASH_CUT_COLUMNS = [
+  'invoice',
+  'time',
+  'client',
+  'cashier',
+  'type',
+  'status',
+  'total',
+] as const satisfies readonly TableColumn[];
 
 export const CREDIT_LIST_COLUMNS = [
   'invoice',
@@ -72,11 +102,24 @@ export const POS_RECENT_COLUMNS = [
   { key: 'actions', className: 'no-print' },
 ] as const satisfies readonly TableColumn[];
 
+export const VOID_INVOICE_COLUMNS = [
+  'invoice',
+  'client',
+  'product',
+  'qty',
+  'total',
+  'payment',
+  'status',
+  'date',
+  'cashier',
+  { key: 'actions', className: 'no-print' },
+] as const satisfies readonly TableColumn[];
+
 export const PRODUCT_PICKER_COLUMNS = [
   { key: 'sku', className: 'w-[12%]' },
   { key: 'product', className: 'w-[21%]' },
   { key: 'generic', className: 'w-[17%]' },
-  { key: 'brand', className: 'w-[12%]' },
+  { key: 'brandLab', className: 'w-[12%]' },
   { key: 'existence', className: 'w-[7%]' },
   { key: 'dispatch', className: 'w-[7%]' },
   { key: 'price1', className: 'w-[7%]' },
@@ -88,7 +131,7 @@ export const PRODUCT_LIST_COLUMNS = [
   'sku',
   'product',
   'generic',
-  'brand',
+  'brandLab',
   'category',
   'price1',
   'price2',
@@ -124,6 +167,7 @@ export const LOW_STOCK_COLUMNS = [
 export const INTAKE_PRODUCT_COLUMNS = [
   'sku',
   'product',
+  'brandLab',
   'existence',
   'dispatch',
   'warehouse',
